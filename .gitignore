@@ -2,6 +2,8 @@ target/
 node_modules/
 dist/
 *.tsbuildinfo
+PLAN.md
+PR_SUMMARY.md
 .idea/
 .vscode/
 *.iml
