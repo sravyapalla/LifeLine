@@ -408,6 +408,61 @@ button {
   color: #64748b;
 }
 
+.candidate-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.candidate-list h4 {
+  font-size: 13px;
+  margin: 0;
+}
+
+.candidate-row {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  min-height: 52px;
+  padding: 8px;
+}
+
+.candidate-row > span {
+  background: #dbeafe;
+  border-radius: 999px;
+  color: #1d4ed8;
+  display: grid;
+  font-size: 12px;
+  font-weight: 900;
+  height: 24px;
+  place-items: center;
+  width: 24px;
+}
+
+.candidate-row strong,
+.candidate-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-row small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.candidate-row em {
+  color: #172033;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .resource-list {
   display: grid;
   gap: 8px;
@@ -498,4 +553,3 @@ button {
     flex: 1;
   }
 }
-

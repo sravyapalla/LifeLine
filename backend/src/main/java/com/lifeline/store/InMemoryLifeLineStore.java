@@ -4,15 +4,18 @@ import com.lifeline.dispatch.CandidateScore;
 import com.lifeline.domain.Ambulance;
 import com.lifeline.domain.AmbulanceStatus;
 import com.lifeline.domain.AmbulanceType;
+import com.lifeline.domain.DispatchAuditRecord;
 import com.lifeline.domain.EmergencyCondition;
 import com.lifeline.domain.Hospital;
 import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentPriority;
 import com.lifeline.domain.IncidentStatus;
 import com.lifeline.domain.Location;
+import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
 import jakarta.annotation.PostConstruct;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -25,7 +28,8 @@ import java.util.Set;
 import java.util.UUID;
 
 @Component
-public class InMemoryLifeLineStore {
+@Profile("memory")
+public class InMemoryLifeLineStore implements LifeLineStore {
     private final Map<String, Ambulance> ambulances = new LinkedHashMap<>();
     private final Map<String, Hospital> hospitals = new LinkedHashMap<>();
     private final Map<String, Incident> incidents = new LinkedHashMap<>();
@@ -59,30 +63,47 @@ public class InMemoryLifeLineStore {
         saveIncident(new Incident("INC-302", "Rohan Mehta", "+91-90000-10002", EmergencyCondition.TRAUMA, IncidentPriority.HIGH, new Location(12.9166, 77.6101), Instant.now().minusSeconds(90), IncidentStatus.NEW));
     }
 
+    @Override
     public synchronized List<Ambulance> ambulances() {
         return new ArrayList<>(ambulances.values());
     }
 
+    @Override
     public synchronized List<Hospital> hospitals() {
         return new ArrayList<>(hospitals.values());
     }
 
+    @Override
     public synchronized List<Incident> incidents() {
         return new ArrayList<>(incidents.values());
     }
 
+    @Override
     public synchronized List<Trip> trips() {
         return new ArrayList<>(trips.values());
     }
 
+    @Override
+    public synchronized List<DispatchAuditRecord> dispatchDecisions() {
+        return List.of();
+    }
+
+    @Override
+    public synchronized List<OutboxEvent> outboxEvents() {
+        return List.of();
+    }
+
+    @Override
     public synchronized Optional<Incident> findIncident(String id) {
         return Optional.ofNullable(incidents.get(id));
     }
 
+    @Override
     public synchronized Optional<Ambulance> findAmbulance(String id) {
         return Optional.ofNullable(ambulances.get(id));
     }
 
+    @Override
     public synchronized Optional<Hospital> findHospital(String id) {
         return Optional.ofNullable(hospitals.get(id));
     }
@@ -92,6 +113,7 @@ public class InMemoryLifeLineStore {
         return incident;
     }
 
+    @Override
     public synchronized Incident createIncident(
             String patientName,
             String phone,
@@ -105,7 +127,14 @@ public class InMemoryLifeLineStore {
         return incident;
     }
 
-    public synchronized Trip commitAssignment(String incidentId, String ambulanceId, String hospitalId, CandidateScore score) {
+    @Override
+    public synchronized Trip commitAssignment(
+            String incidentId,
+            String ambulanceId,
+            String hospitalId,
+            CandidateScore score,
+            List<CandidateScore> alternatives
+    ) {
         Incident incident = incidents.get(incidentId);
         Ambulance ambulance = ambulances.get(ambulanceId);
         Hospital hospital = hospitals.get(hospitalId);
