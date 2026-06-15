@@ -242,6 +242,19 @@ export default function App() {
                 <strong>Score {lastDecision.winningScore.totalCost}</strong>
                 <small>{lastDecision.winningScore.explanation}</small>
               </div>
+              <div className="candidate-list">
+                <h4>Top Candidates</h4>
+                {lastDecision.alternatives.slice(0, 5).map((candidate, index) => (
+                  <div className="candidate-row" key={`${candidate.ambulanceId}-${candidate.hospitalId}`}>
+                    <span>{index + 1}</span>
+                    <div>
+                      <strong>{candidate.ambulanceId} → {candidate.hospitalId}</strong>
+                      <small>{candidate.explanation}</small>
+                    </div>
+                    <em>{candidate.totalCost}</em>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
@@ -337,4 +350,3 @@ function MapPanel({
     </div>
   );
 }
-

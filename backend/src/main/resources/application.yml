@@ -1,9 +1,22 @@
 spring:
   application:
     name: lifeline-backend
+  datasource:
+    url: ${LIFELINE_DB_URL:jdbc:postgresql://localhost:5432/lifeline}
+    username: ${LIFELINE_DB_USERNAME:lifeline}
+    password: ${LIFELINE_DB_PASSWORD:lifeline}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
 
 server:
   port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
 
 lifeline:
   dispatch:

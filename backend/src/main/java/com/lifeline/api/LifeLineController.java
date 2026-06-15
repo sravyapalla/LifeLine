@@ -5,12 +5,14 @@ import com.lifeline.dispatch.DispatchEngine;
 import com.lifeline.dispatch.NoDispatchCandidateException;
 import com.lifeline.domain.Ambulance;
 import com.lifeline.domain.AmbulanceStatus;
+import com.lifeline.domain.DispatchAuditRecord;
 import com.lifeline.domain.Hospital;
 import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentStatus;
 import com.lifeline.domain.Location;
+import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
-import com.lifeline.store.InMemoryLifeLineStore;
+import com.lifeline.store.LifeLineStore;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -29,10 +31,10 @@ import java.util.List;
 @RequestMapping("/api")
 @CrossOrigin(origins = "*")
 public class LifeLineController {
-    private final InMemoryLifeLineStore store;
+    private final LifeLineStore store;
     private final DispatchEngine dispatchEngine;
 
-    public LifeLineController(InMemoryLifeLineStore store, DispatchEngine dispatchEngine) {
+    public LifeLineController(LifeLineStore store, DispatchEngine dispatchEngine) {
         this.store = store;
         this.dispatchEngine = dispatchEngine;
     }
@@ -55,6 +57,16 @@ public class LifeLineController {
     @GetMapping("/trips")
     public List<Trip> trips() {
         return store.trips();
+    }
+
+    @GetMapping("/dispatch-decisions")
+    public List<DispatchAuditRecord> dispatchDecisions() {
+        return store.dispatchDecisions();
+    }
+
+    @GetMapping("/outbox-events")
+    public List<OutboxEvent> outboxEvents() {
+        return store.outboxEvents();
     }
 
     @GetMapping("/metrics")
@@ -100,7 +112,8 @@ public class LifeLineController {
                 incident.id(),
                 decision.ambulance().id(),
                 decision.hospital().id(),
-                decision.winningScore()
+                decision.winningScore(),
+                decision.alternatives()
         );
 
         Incident updatedIncident = store.findIncident(incident.id()).orElseThrow();
@@ -134,4 +147,3 @@ public class LifeLineController {
         return new ErrorResponse(exception.getMessage());
     }
 }
-
