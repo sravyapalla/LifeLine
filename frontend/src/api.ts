@@ -11,6 +11,8 @@ import type {
   OutboxEvent,
   OutboxPublishResponse,
   OutboxSummary,
+  SimulationRequestPayload,
+  SimulationResult,
   Trip,
   TripStatus,
   UpdateAmbulanceLocationPayload
@@ -41,7 +43,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function getDashboardData(role = 'control') {
-  const [ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications] = await Promise.all([
+  const [ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications, simulations] = await Promise.all([
     request<Ambulance[]>('/ambulances'),
     request<AmbulanceLocationSnapshot[]>('/ambulance-locations'),
     request<Hospital[]>('/hospitals'),
@@ -51,10 +53,11 @@ export async function getDashboardData(role = 'control') {
     request<OutboxEvent[]>('/outbox-events'),
     request<OutboxSummary>('/outbox-events/summary'),
     request<Metrics>('/metrics'),
-    request<Notification[]>(`/notifications?role=${role}`)
+    request<Notification[]>(`/notifications?role=${role}`),
+    request<SimulationResult[]>('/simulations')
   ]);
 
-  return { ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications };
+  return { ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications, simulations };
 }
 
 export function createIncident(payload: CreateIncidentPayload) {
@@ -114,4 +117,15 @@ export function acknowledgeNotification(notificationId: string) {
   return request<Notification>(`/notifications/${notificationId}/ack`, {
     method: 'POST'
   });
+}
+
+export function runSimulation(payload: SimulationRequestPayload) {
+  return request<SimulationResult>('/simulations', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getSimulation(simulationId: string) {
+  return request<SimulationResult>(`/simulations/${simulationId}`);
 }

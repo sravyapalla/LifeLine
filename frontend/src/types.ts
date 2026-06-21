@@ -5,6 +5,7 @@ export type IncidentPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type IncidentStatus = 'NEW' | 'ASSIGNED' | 'CANCELLED' | 'COMPLETED';
 export type TripStatus = 'RESERVED' | 'EN_ROUTE_PATIENT' | 'EN_ROUTE_HOSPITAL' | 'COMPLETED' | 'CANCELLED';
 export type NotificationRole = 'PATIENT' | 'DRIVER' | 'HOSPITAL' | 'CONTROL';
+export type OptimizationStrategy = 'GREEDY_SEQUENTIAL' | 'GLOBAL_MIN_COST';
 
 export interface Location {
   latitude: number;
@@ -174,4 +175,47 @@ export interface CreateIncidentPayload {
 export interface UpdateAmbulanceLocationPayload {
   latitude: number;
   longitude: number;
+}
+
+export interface SimulationRequestPayload {
+  incidentCount: number;
+  randomSeed: number;
+  criticalRatio: number;
+  ambulanceOutages: string[];
+  exhaustedHospitals: string[];
+  capacityStressPercent: number;
+  strategy: OptimizationStrategy;
+}
+
+export interface SimulationAssignment {
+  strategy: OptimizationStrategy;
+  incidentId: string;
+  condition: EmergencyCondition;
+  priority: IncidentPriority;
+  incidentLocation: Location;
+  ambulanceId: string | null;
+  hospitalId: string | null;
+  pickupEtaMinutes: number;
+  hospitalEtaMinutes: number;
+  totalCost: number;
+  matched: boolean;
+  reason: string;
+}
+
+export interface SimulationStrategyResult {
+  strategy: OptimizationStrategy;
+  matchedCount: number;
+  unmatchedCount: number;
+  averagePickupEtaMinutes: number;
+  averageTransferEtaMinutes: number;
+  totalCost: number;
+  improvementPercent: number;
+  assignments: SimulationAssignment[];
+}
+
+export interface SimulationResult {
+  id: string;
+  request: SimulationRequestPayload;
+  createdAt: string;
+  strategyResults: SimulationStrategyResult[];
 }

@@ -327,6 +327,142 @@ button {
   max-width: 1560px;
 }
 
+.simulation-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 330px minmax(0, 1fr) 360px;
+  margin: 0 auto;
+  max-width: 1560px;
+}
+
+.simulation-main {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.simulation-controls,
+.simulation-side {
+  min-height: 680px;
+}
+
+.comparison-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.strategy-card {
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.strategy-numbers {
+  display: grid;
+  gap: 0;
+}
+
+.simulation-map .map-card,
+.simulation-map .map {
+  height: 370px;
+}
+
+.selector-group {
+  border-top: 1px solid #e2e8f0;
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.selector-group h3 {
+  font-size: 14px;
+  margin: 0;
+}
+
+.selector-group label {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #172033;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 16px minmax(0, 1fr);
+  min-height: 38px;
+  padding: 8px;
+}
+
+.selector-group span {
+  font-size: 12px;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-select {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  color: #172033;
+  min-height: 40px;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.assignment-table {
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.assignment-header,
+.assignment-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1.2fr 1.3fr 0.9fr 0.6fr;
+  min-height: 48px;
+  padding: 10px 12px;
+}
+
+.assignment-header {
+  background: #eef2f6;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.assignment-row {
+  align-items: center;
+  border-top: 1px solid #e2e8f0;
+}
+
+.assignment-row.unmatched {
+  background: #fff7ed;
+}
+
+.assignment-row strong,
+.assignment-row small,
+.assignment-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assignment-row small {
+  color: #64748b;
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .panel {
   min-height: 680px;
   padding: 16px;
@@ -378,6 +514,11 @@ button {
 
 .compact-map .map {
   height: 580px;
+}
+
+.simulation-map .compact-map,
+.simulation-map .compact-map .map {
+  height: 370px;
 }
 
 .incident-list,
@@ -978,13 +1119,15 @@ button {
 
   .patient-layout,
   .control-layout,
-  .driver-layout {
+  .driver-layout,
+  .simulation-layout {
     grid-template-columns: 320px minmax(0, 1fr);
   }
 
   .patient-layout > aside:last-child,
   .control-layout > aside:last-child,
-  .driver-layout > aside:last-child {
+  .driver-layout > aside:last-child,
+  .simulation-layout > aside:last-child {
     grid-column: 1 / -1;
     min-height: auto;
   }
@@ -1008,6 +1151,8 @@ button {
   .patient-layout,
   .control-layout,
   .driver-layout,
+  .simulation-layout,
+  .comparison-grid,
   .hospital-grid,
   .trip-grid {
     grid-template-columns: 1fr;
@@ -1052,6 +1197,14 @@ button {
   }
 
   .event-type-row {
+    grid-template-columns: 1fr;
+  }
+
+  .assignment-header {
+    display: none;
+  }
+
+  .assignment-row {
     grid-template-columns: 1fr;
   }
 
