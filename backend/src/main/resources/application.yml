@@ -35,6 +35,7 @@ lifeline:
     ttl-seconds: 180
   kafka:
     outbox-topic: lifeline.outbox.events
+    publish-timeout-seconds: 5
   outbox:
     publish:
       enabled: false
@@ -42,6 +43,6 @@ lifeline:
       fixed-delay-ms: 5000
       retry-delay-seconds: 30
     publisher:
-      mode: logging
+      mode: kafka
       fail-event-type: ""
       failure-message: Configured outbox publisher failure
