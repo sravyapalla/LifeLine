@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway-service
+  namespace: lifeline
+  labels:
+    app.kubernetes.io/name: gateway-service
+    app.kubernetes.io/part-of: lifeline
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gateway-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gateway-service
+        app.kubernetes.io/part-of: lifeline
+    spec:
+      containers:
+        - name: gateway-service
+          image: lifeline/gateway-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8088
+          envFrom:
+            - configMapRef:
+                name: lifeline-config
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8088
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8088
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 150m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-service
+  namespace: lifeline
+spec:
+  selector:
+    app.kubernetes.io/name: gateway-service
+  ports:
+    - name: http
+      port: 8088
+      targetPort: 8088
