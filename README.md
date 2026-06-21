@@ -11,8 +11,9 @@ The product direction is intentionally pragmatic: build a correct, explainable d
 | V1 | Implemented | End-to-end dispatch prototype with seeded Bengaluru data, in-memory state, REST APIs, and React dashboard |
 | V2 | Implemented | Durable dispatch foundation with PostgreSQL/PostGIS schema, row-locked reservations, decision audit, outbox records, and candidate explanations |
 | V3 | Implemented | Multi-actor workflow with patient, driver, hospital, and control tower role surfaces plus rerouting actions |
-| V4 | Implemented in this branch | Event-driven reliability foundation with processable outbox events, health summaries, publish metrics, and control tower visibility |
-| V5 | Implemented in this branch | Ops Simulator with required Docker runtime, Kafka event streaming, Redis live locations, notifications, routing abstraction, and optimization comparisons |
+| V4 | Implemented | Event-driven reliability foundation with processable outbox events, health summaries, publish metrics, and control tower visibility |
+| V5 | Implemented | Ops Simulator with required Docker runtime, Kafka event streaming, Redis live locations, notifications, routing abstraction, and optimization comparisons |
+| V6 | Implemented in this branch | Production Trust release with local JWT auth, backend RBAC, least-privilege PII responses, security audit trail, hardened API boundaries, and authenticated role UI |
 
 ## V1 Implemented Scope
 
@@ -75,6 +76,18 @@ The product direction is intentionally pragmatic: build a correct, explainable d
 - Greedy sequential versus global min-cost optimization comparison
 - New `/simulation` route for scenario design, comparison, and playback
 - Expanded operational metrics for simulations, live locations, notifications, and Kafka failures
+
+## V6 Implemented Scope
+
+- Stateless local JWT authentication with seeded demo users
+- Backend-enforced RBAC for patient, driver, hospital, and control roles
+- Incident ownership through `requester_user_id`
+- Role-aware incident responses with masked patient PII for driver and hospital users
+- Control-only security audit trail for login, denied access, dispatch, trip status, hospital capacity, reroute, outbox publish, simulation, notification ack, and demo reset events
+- Configurable CORS allowed origins with `http://localhost:5173` as the local default
+- Consistent JSON error responses for API and security failures
+- Authenticated React login/logout flow with route gating and signed-in user badge
+- Control Tower audit visibility alongside outbox and workflow timeline
 
 ## V2 Product Goal
 
@@ -345,6 +358,98 @@ data/
     outbox event stream
 ```
 
+## V6 Product Goal
+
+V6 makes LifeLine trustworthy enough to demo as a production-shaped emergency platform.
+
+The V6 goal is not external OAuth or multi-tenant identity yet. The goal is to prove local trust boundaries:
+
+1. Every API request is authenticated except login and health.
+2. Role access is enforced by the backend, not by hidden frontend tabs.
+3. Patients see their own incidents and full contact data.
+4. Drivers and hospitals see only operational incident details for assigned work.
+5. Control can inspect the full system, run simulations, publish events, and view audit events.
+6. Sensitive actions and denied attempts are recorded in a durable audit trail.
+
+## V6 Target Architecture
+
+```text
+frontend/
+  login
+    JWT stored in local storage
+    Authorization: Bearer attached to API calls
+
+  role routes
+    /patient      patient-owned incidents and care journey
+    /driver       assigned ambulance and trips
+    /hospital     scoped hospital capacity and incoming trips
+    /control      full operational control plus security audit
+    /simulation   control-only ops simulator
+
+backend/
+  security
+    DemoUserDirectory
+    JwtService
+    JwtAuthenticationFilter
+    SecurityAuditService
+
+  api
+    authenticated REST boundary
+    role-aware response DTOs
+    JSON error contract
+
+  store
+    PostgreSQL source of truth
+    memory profile parity
+
+data/
+  incidents.requester_user_id
+    patient ownership boundary
+
+  security_audit_events
+    actor, role, action, resource, outcome, reason, metadata, timestamp
+```
+
+## V6 Auth Model
+
+Demo users:
+
+| Username | Password | Role | Scope |
+| --- | --- | --- | --- |
+| `patient.demo` | `lifeline-demo` | `PATIENT` | Own seeded and newly requested incidents |
+| `driver.demo` | `lifeline-demo` | `DRIVER` | Ambulance `AMB-101` and assigned trips |
+| `hospital.demo` | `lifeline-demo` | `HOSPITAL` | Hospital `HOS-201` and incoming trips |
+| `control.demo` | `lifeline-demo` | `CONTROL` | Full operational access |
+
+JWT claims include `sub`, `role`, optional `ambulanceId` or `hospitalId`, `iat`, and `exp`.
+
+Use `LIFELINE_JWT_SECRET` outside local demos. The default secret exists only so the app can run locally without third-party setup.
+
+## V6 RBAC Matrix
+
+| Capability | Patient | Driver | Hospital | Control |
+| --- | --- | --- | --- | --- |
+| Login and read own profile | Yes | Yes | Yes | Yes |
+| Create incident | Yes | No | No | Yes |
+| View incidents | Own only | Assigned trips only, masked | Incoming trips only, masked | All |
+| View ambulances | Assigned trip only | Own ambulance | Incoming trip only | All |
+| Update ambulance location | No | Own ambulance | No | Any |
+| View hospitals | Assigned trip only | Assigned trip only | Own hospital | All |
+| Update hospital capacity | No | No | Own hospital | Any |
+| Dispatch or reroute | No | No | No | Yes |
+| Publish outbox | No | No | No | Yes |
+| Run simulations | No | No | No | Yes |
+| View audit events | No | No | No | Yes |
+| Notifications | Own role only | Own role only | Own role only | Any role |
+
+## V6 PII Policy
+
+- Patient and control users receive full patient name and phone for incidents they are allowed to see.
+- Driver and hospital users receive operational incident details only.
+- Driver and hospital incident views use the incident id as the visible patient label.
+- Driver and hospital phone values are masked to the last four digits.
+- The internal domain still keeps full incident data so dispatch and audit logic remain consistent; masking happens at the API boundary.
+
 ## Design Decisions
 
 | ID | Decision | Why |
@@ -379,6 +484,12 @@ data/
 | D28 | Add routing as a provider boundary before OSRM | The dispatch engine should depend on route estimates, not a specific routing vendor. |
 | D29 | Keep simulation deterministic with explicit random seeds | Operators and reviewers should be able to replay the same incident surge and compare strategies repeatably. |
 | D30 | Compare greedy and global optimization side by side | V5 should teach why optimization matters without replacing the explainable greedy workflow prematurely. |
+| D31 | Use local JWT auth for V6 instead of external OAuth | The demo remains self-contained while leaving external providers plug-in-ready for a later version. |
+| D32 | Enforce RBAC in the backend | Frontend route gating improves UX, but the API must be the trust boundary. |
+| D33 | Mask PII at response mapping time | Dispatch can keep rich internal data while role-specific API DTOs enforce least privilege. |
+| D34 | Persist security audit events | Production trust requires an inspectable record of allowed and denied sensitive actions. |
+| D35 | Keep control-only operations explicit | Dispatch, reroute, simulation, outbox publishing, and audit views carry operational risk and should be centralized. |
+| D36 | Use configurable CORS origins | Local demos should work by default, but wildcard CORS should not be part of the trusted runtime. |
 
 ## V2 Data Ownership
 
@@ -413,6 +524,8 @@ The reservation operation should be idempotent using a request key or incident-l
 
 Current APIs:
 
+- `POST /api/auth/login`
+- `GET /api/auth/me`
 - `GET /api/ambulances`
 - `GET /api/hospitals`
 - `GET /api/incidents`
@@ -436,10 +549,11 @@ Current APIs:
 - `POST /api/simulations`
 - `GET /api/simulations`
 - `GET /api/simulations/{id}`
+- `GET /api/audit-events?limit={limit}`
 
-V2 keeps the original APIs stable where possible, V3 adds role workflow actions for trips, hospital capacity, and rerouting, V4 adds outbox processing and health operations, and V5 adds live location, notifications, and simulation APIs. The V4/V5 publish response reports `published`, `failed`, and remaining `pending` events.
+V2 keeps the original APIs stable where possible, V3 adds role workflow actions for trips, hospital capacity, and rerouting, V4 adds outbox processing and health operations, V5 adds live location, notifications, and simulation APIs, and V6 adds authentication, role-scoped responses, and audit events. The V4/V5/V6 publish response reports `published`, `failed`, and remaining `pending` events.
 
-## V4/V5 Reliability Configuration
+## V4/V5/V6 Runtime Configuration
 
 V4 introduced the local logging/failure adapters for retry demos:
 
@@ -479,6 +593,17 @@ lifeline:
 ```
 
 The `memory` Spring profile remains available for lightweight demos and tests. It keeps outbox publishing in logging mode and uses in-memory live ambulance locations instead of Redis.
+
+V6 auth and CORS defaults:
+
+```yaml
+lifeline:
+  security:
+    jwt-secret: ${LIFELINE_JWT_SECRET:dev-only-local-lifeline-secret-change-me}
+    token-ttl-minutes: 480
+  cors:
+    allowed-origins: ${LIFELINE_ALLOWED_ORIGINS:http://localhost:5173}
+```
 
 V5 simulation rules:
 
@@ -522,7 +647,8 @@ Backend starts at `http://localhost:8080`.
 Quick check:
 
 ```powershell
-curl.exe http://localhost:8080/api/metrics
+$login = curl.exe -s -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" -d "{\"username\":\"control.demo\",\"password\":\"lifeline-demo\"}" | ConvertFrom-Json
+curl.exe -H "Authorization: Bearer $($login.token)" http://localhost:8080/api/metrics
 ```
 
 To run the fallback in-memory profile instead of PostgreSQL:
@@ -548,3 +674,6 @@ Role routes:
 - `http://localhost:5173/driver`
 - `http://localhost:5173/hospital`
 - `http://localhost:5173/control`
+- `http://localhost:5173/simulation`
+
+The app opens with the login screen. Use one of the demo users from the V6 auth table above.
