@@ -32,6 +32,7 @@ lifeline:
     allowed-origins: ${LIFELINE_ALLOWED_ORIGINS:http://localhost:5173}
   security:
     jwt-secret: ${LIFELINE_JWT_SECRET}
+    demo-password: ${LIFELINE_DEMO_PASSWORD}
     token-ttl-minutes: 480
   dispatch:
     average-ambulance-speed-kmph: 32

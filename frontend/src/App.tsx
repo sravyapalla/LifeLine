@@ -120,7 +120,7 @@ export default function App() {
   const [role, setRole] = useState<Role>(() => roleFromPath(window.location.pathname));
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
-  const [loginForm, setLoginForm] = useState({ username: 'control.demo', password: 'lifeline-demo' });
+  const [loginForm, setLoginForm] = useState({ username: 'control.demo', password: '' });
   const [loginError, setLoginError] = useState('');
   const [data, setData] = useState<DashboardState | null>(null);
   const [selectedIncidentId, setSelectedIncidentId] = useState('');
@@ -601,7 +601,7 @@ function LoginView({
               key={demoUser.username}
               className={`role-tab ${form.username === demoUser.username ? 'active' : ''}`}
               type="button"
-              onClick={() => setForm({ username: demoUser.username, password: 'lifeline-demo' })}
+              onClick={() => setForm({ ...form, username: demoUser.username })}
             >
               <span>{demoUser.label}</span>
             </button>

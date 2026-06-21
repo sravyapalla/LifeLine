@@ -416,10 +416,10 @@ Demo users:
 
 | Username | Password | Role | Scope |
 | --- | --- | --- | --- |
-| `patient.demo` | `lifeline-demo` | `PATIENT` | Own seeded and newly requested incidents |
-| `driver.demo` | `lifeline-demo` | `DRIVER` | Ambulance `AMB-101` and assigned trips |
-| `hospital.demo` | `lifeline-demo` | `HOSPITAL` | Hospital `HOS-201` and incoming trips |
-| `control.demo` | `lifeline-demo` | `CONTROL` | Full operational access |
+| `patient.demo` | `LIFELINE_DEMO_PASSWORD` | `PATIENT` | Own seeded and newly requested incidents |
+| `driver.demo` | `LIFELINE_DEMO_PASSWORD` | `DRIVER` | Ambulance `AMB-101` and assigned trips |
+| `hospital.demo` | `LIFELINE_DEMO_PASSWORD` | `HOSPITAL` | Hospital `HOS-201` and incoming trips |
+| `control.demo` | `LIFELINE_DEMO_PASSWORD` | `CONTROL` | Full operational access |
 
 JWT claims include `sub`, `role`, optional `ambulanceId` or `hospitalId`, `iat`, and `exp`.
 
@@ -642,6 +642,7 @@ Then run the backend:
 ```powershell
 cd backend
 $env:LIFELINE_JWT_SECRET="replace-with-a-long-local-secret"
+$env:LIFELINE_DEMO_PASSWORD="choose-a-local-demo-password"
 mvn spring-boot:run
 ```
 
@@ -650,7 +651,7 @@ Backend starts at `http://localhost:8080`.
 Quick check:
 
 ```powershell
-$login = curl.exe -s -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" -d "{\"username\":\"control.demo\",\"password\":\"lifeline-demo\"}" | ConvertFrom-Json
+$login = curl.exe -s -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" -d "{\"username\":\"control.demo\",\"password\":\"$env:LIFELINE_DEMO_PASSWORD\"}" | ConvertFrom-Json
 curl.exe -H "Authorization: Bearer $($login.token)" http://localhost:8080/api/metrics
 ```
 
@@ -658,6 +659,7 @@ To run the fallback in-memory profile instead of PostgreSQL:
 
 ```powershell
 cd backend
+$env:LIFELINE_DEMO_PASSWORD="choose-a-local-demo-password"
 mvn.cmd spring-boot:run "-Dspring-boot.run.profiles=memory"
 ```
 
