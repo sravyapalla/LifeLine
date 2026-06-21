@@ -15,6 +15,7 @@ import type {
   OutboxEvent,
   OutboxPublishResponse,
   OutboxSummary,
+  PlatformServicesResponse,
   SecurityAuditEvent,
   SimulationRequestPayload,
   SimulationResult,
@@ -24,7 +25,7 @@ import type {
   UserRole
 } from './types';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api';
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8088/api';
 const TOKEN_KEY = 'lifeline.jwt';
 
 const emptyOutboxSummary: OutboxSummary = {
@@ -130,6 +131,10 @@ export async function getDashboardData(role: NotificationRole, userRole: UserRol
 
 export function getAuditEvents(limit = 100) {
   return request<SecurityAuditEvent[]>(`/audit-events?limit=${limit}`);
+}
+
+export function getPlatformServices() {
+  return request<PlatformServicesResponse>('/platform/services');
 }
 
 export function createIncident(payload: CreateIncidentPayload) {

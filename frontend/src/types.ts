@@ -257,3 +257,14 @@ export interface SecurityAuditEvent {
   metadata: string;
   createdAt: string;
 }
+
+export interface PlatformServiceDescriptor {
+  name: string;
+  responsibility: string;
+  baseUrl: string;
+  healthUrl: string;
+}
+
+export interface PlatformServicesResponse {
+  services: PlatformServiceDescriptor[];
+}

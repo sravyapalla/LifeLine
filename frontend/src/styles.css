@@ -1157,6 +1157,59 @@ button {
   text-align: right;
 }
 
+.platform-panel {
+  border-top: 1px solid #e2e8f0;
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+.service-list {
+  display: grid;
+  gap: 8px;
+}
+
+.service-row {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 58px;
+  padding: 9px 10px;
+}
+
+.service-row span {
+  min-width: 0;
+}
+
+.service-row strong,
+.service-row small,
+.service-row em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-row small {
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.service-row em {
+  color: #475569;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  max-width: 130px;
+  text-align: right;
+}
+
 .outbox-panel {
   border-bottom: 1px solid #e2e8f0;
   border-top: 1px solid #e2e8f0;

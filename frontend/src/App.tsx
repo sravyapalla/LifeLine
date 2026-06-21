@@ -31,6 +31,7 @@ import {
   getAuditEvents,
   getCurrentUser,
   getDashboardData,
+  getPlatformServices,
   getStoredAuthToken,
   login,
   publishOutboxEvents,
@@ -59,6 +60,7 @@ import type {
   OutboxEvent,
   OutboxPublishResponse,
   OutboxSummary,
+  PlatformServiceDescriptor,
   SimulationAssignment,
   SimulationRequestPayload,
   SimulationResult,
@@ -132,6 +134,7 @@ export default function App() {
   const [simulationForm, setSimulationForm] = useState<SimulationRequestPayload>(initialSimulationRequest);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [auditEvents, setAuditEvents] = useState<SecurityAuditEvent[]>([]);
+  const [platformServices, setPlatformServices] = useState<PlatformServiceDescriptor[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -141,8 +144,10 @@ export default function App() {
     const nextRole = roleFromPath(rolePath(currentRole), currentUser);
     const nextData = await getDashboardData(notificationRoleFor(nextRole), currentUser.role);
     const nextAuditEvents = currentUser.role === 'CONTROL' ? await getAuditEvents() : [];
+    const nextPlatformServices = currentUser.role === 'CONTROL' ? await loadPlatformServices() : [];
     setData(nextData);
     setAuditEvents(nextAuditEvents);
+    setPlatformServices(nextPlatformServices);
     setSimulationResult((current) => current ?? nextData.simulations[0] ?? null);
     setCapacityDrafts(Object.fromEntries(nextData.hospitals.map((hospital) => [hospital.id, hospital.availableBeds])));
     setSelectedIncidentId((current) => {
@@ -234,6 +239,7 @@ export default function App() {
     setUser(null);
     setData(null);
     setAuditEvents([]);
+    setPlatformServices([]);
     setSelectedIncidentId('');
     setSelectedTripId('');
     setLastDecision(null);
@@ -533,6 +539,7 @@ export default function App() {
           lastDecision={lastDecision}
           lastOutboxPublish={lastOutboxPublish}
           auditEvents={auditEvents}
+          platformServices={platformServices}
           busy={busy}
         />
       )}
@@ -550,6 +557,15 @@ export default function App() {
       )}
     </main>
   );
+}
+
+async function loadPlatformServices() {
+  try {
+    const response = await getPlatformServices();
+    return response.services;
+  } catch {
+    return [];
+  }
 }
 
 function LoginView({
@@ -916,6 +932,7 @@ function ControlView({
   lastDecision,
   lastOutboxPublish,
   auditEvents,
+  platformServices,
   busy
 }: {
   data: DashboardState | null;
@@ -932,6 +949,7 @@ function ControlView({
   lastDecision: DispatchResponse | null;
   lastOutboxPublish: OutboxPublishResponse | null;
   auditEvents: SecurityAuditEvent[];
+  platformServices: PlatformServiceDescriptor[];
   busy: boolean;
 }) {
   return (
@@ -1054,6 +1072,8 @@ function ControlView({
         <Timeline events={data?.outboxEvents ?? []} decisions={data?.dispatchDecisions ?? []} />
 
         <AuditPanel events={auditEvents} />
+
+        <PlatformServicesPanel services={platformServices} />
       </aside>
     </section>
   );
@@ -1598,6 +1618,33 @@ function AuditPanel({ events }: { events: SecurityAuditEvent[] }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function PlatformServicesPanel({ services }: { services: PlatformServiceDescriptor[] }) {
+  if (services.length === 0) return null;
+
+  return (
+    <div className="platform-panel">
+      <div className="panel-heading compact-heading">
+        <div>
+          <p className="eyebrow">Runtime</p>
+          <h3>Services</h3>
+        </div>
+        <RadioTower size={18} />
+      </div>
+      <div className="service-list">
+        {services.map((service) => (
+          <article className="service-row" key={service.name}>
+            <span>
+              <strong>{service.name}</strong>
+              <small>{service.responsibility}</small>
+            </span>
+            <em>{service.baseUrl.replace(/^https?:\/\//, '')}</em>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
