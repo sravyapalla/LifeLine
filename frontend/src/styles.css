@@ -414,6 +414,10 @@ button {
   max-width: 1560px;
 }
 
+.hospital-ops-layout {
+  grid-template-columns: 340px minmax(0, 1fr) 420px;
+}
+
 .simulation-layout {
   display: grid;
   gap: 18px;
@@ -744,6 +748,78 @@ button {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.coverage-panel {
+  border-top: 1px solid #e2e8f0;
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.coverage-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.coverage-grid article {
+  background: #eef2f6;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  min-height: 72px;
+  padding: 12px;
+}
+
+.coverage-grid strong {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.coverage-grid span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.coverage-list {
+  display: grid;
+  gap: 8px;
+}
+
+.coverage-row {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  min-height: 50px;
+  padding: 9px 10px;
+}
+
+.coverage-row strong,
+.coverage-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coverage-row small {
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.tracking-panel {
+  border-top: 1px solid #e2e8f0;
+  margin-top: 14px;
+  padding-top: 4px;
+}
+
 .journey-panel,
 .selected-call,
 .score-box,
@@ -954,6 +1030,76 @@ button {
   min-width: 0;
 }
 
+.driver-unit {
+  display: grid;
+  gap: 10px;
+}
+
+.unit-card {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  min-height: 82px;
+  padding: 14px;
+}
+
+.unit-card h3,
+.unit-card p {
+  margin: 0;
+}
+
+.unit-card h3 {
+  font-size: 22px;
+}
+
+.unit-card p {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.driver-hospital-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.receiving-row {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  min-height: 58px;
+  padding: 10px;
+}
+
+.receiving-row.selected {
+  background: #fff7ed;
+  border-color: #fb923c;
+}
+
+.receiving-row strong,
+.receiving-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.receiving-row small {
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .trip-select {
   background: transparent;
   border: 0;
@@ -981,6 +1127,45 @@ button {
 
 .hospital-card {
   min-height: 500px;
+}
+
+.hospital-load-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.hospital-load-card strong {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.hospital-load-card span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.hospital-load-card div {
+  background: #dbe4ee;
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.hospital-load-card i {
+  background: #dc2626;
+  display: block;
+  height: 100%;
+}
+
+.hospital-incoming-board {
+  display: grid;
+  gap: 10px;
 }
 
 .capacity-pill {
@@ -1106,6 +1291,39 @@ button {
   margin-top: 16px;
 }
 
+.command-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.command-summary article {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  min-height: 66px;
+  padding: 10px;
+}
+
+.command-summary article.attention {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.command-summary strong {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.command-summary span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 900;
+}
+
 .audit-panel {
   border-top: 1px solid #e2e8f0;
   display: grid;
@@ -1154,6 +1372,59 @@ button {
   font-size: 11px;
   font-style: normal;
   font-weight: 900;
+  text-align: right;
+}
+
+.platform-panel {
+  border-top: 1px solid #e2e8f0;
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+.service-list {
+  display: grid;
+  gap: 8px;
+}
+
+.service-row {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 58px;
+  padding: 9px 10px;
+}
+
+.service-row span {
+  min-width: 0;
+}
+
+.service-row strong,
+.service-row small,
+.service-row em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.service-row small {
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.service-row em {
+  color: #475569;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  max-width: 130px;
   text-align: right;
 }
 
@@ -1258,6 +1529,7 @@ button {
   .patient-layout,
   .control-layout,
   .driver-layout,
+  .hospital-ops-layout,
   .simulation-layout {
     grid-template-columns: 320px minmax(0, 1fr);
   }
@@ -1265,6 +1537,7 @@ button {
   .patient-layout > aside:last-child,
   .control-layout > aside:last-child,
   .driver-layout > aside:last-child,
+  .hospital-ops-layout > aside:last-child,
   .simulation-layout > aside:last-child {
     grid-column: 1 / -1;
     min-height: auto;
@@ -1289,6 +1562,7 @@ button {
   .patient-layout,
   .control-layout,
   .driver-layout,
+  .hospital-ops-layout,
   .simulation-layout,
   .comparison-grid,
   .hospital-grid,

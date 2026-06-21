@@ -11,9 +11,12 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Map;
+import java.util.UUID;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
@@ -30,6 +33,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("memory")
 class LifeLineSecurityApiTest {
+    private static final String DEMO_PASSWORD = UUID.randomUUID().toString();
+
     @Autowired
     private MockMvc mockMvc;
 
@@ -46,6 +51,11 @@ class LifeLineSecurityApiTest {
     void resetDemoState() {
         store.reset();
         ambulanceLocationProjection.clear();
+    }
+
+    @DynamicPropertySource
+    static void authProperties(DynamicPropertyRegistry registry) {
+        registry.add("lifeline.security.demo-password", () -> DEMO_PASSWORD);
     }
 
     @Test
@@ -112,6 +122,44 @@ class LifeLineSecurityApiTest {
     }
 
     @Test
+    void patientCanReadCoverageSnapshotButOnlyOwnIncidents() throws Exception {
+        String patientToken = login("patient.demo");
+
+        mockMvc.perform(get("/api/ambulances")
+                        .header("Authorization", bearer(patientToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id", notNullValue()))
+                .andExpect(jsonPath("$[0].status", is("AVAILABLE")));
+
+        mockMvc.perform(get("/api/hospitals")
+                        .header("Authorization", bearer(patientToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id", notNullValue()))
+                .andExpect(jsonPath("$[0].availableBeds", notNullValue()));
+
+        mockMvc.perform(get("/api/trips")
+                        .header("Authorization", bearer(patientToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()", is(0)));
+    }
+
+    @Test
+    void driverCanReadReceivingHospitalAvailabilityWithoutUnassignedIncidents() throws Exception {
+        String driverToken = login("driver.demo");
+
+        mockMvc.perform(get("/api/hospitals")
+                        .header("Authorization", bearer(driverToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id", notNullValue()))
+                .andExpect(jsonPath("$[0].availableBeds", notNullValue()));
+
+        mockMvc.perform(get("/api/incidents")
+                        .header("Authorization", bearer(driverToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()", is(0)));
+    }
+
+    @Test
     void hospitalCanUpdateOwnCapacityButNotAnotherHospital() throws Exception {
         String hospitalToken = login("hospital.demo");
 
@@ -144,7 +192,7 @@ class LifeLineSecurityApiTest {
     private String login(String username) throws Exception {
         String response = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("username", username, "password", "lifeline-demo"))))
+                        .content(json(Map.of("username", username, "password", DEMO_PASSWORD))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token", notNullValue()))
                 .andReturn()

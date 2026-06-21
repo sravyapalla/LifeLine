@@ -1,0 +1,41 @@
+spring:
+  application:
+    name: lifeline-dispatch-service
+
+server:
+  port: 8093
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+lifeline:
+  service:
+    name: dispatch
+    domain: matching
+    responsibility: Candidate search, explainable scoring, reservations, reroute, and routing provider integration.
+    owns:
+      - dispatch decisions
+      - candidate scores
+      - reservation commands
+      - routing provider integration
+    consumes:
+      - incident.created
+      - ambulance.location.updated
+      - hospital.capacity.updated
+    publishes:
+      - dispatch.assigned
+      - dispatch.rerouted
+      - dispatch.rejected
+    public-apis:
+      - POST /api/dispatch
+      - POST /api/trips/{id}/reroute
+      - GET /api/dispatch-decisions
+    dependencies:
+      - incident-service
+      - resource-service
+      - PostgreSQL/PostGIS
+      - Kafka
+      - audit-service

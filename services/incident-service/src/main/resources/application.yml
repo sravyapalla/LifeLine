@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: lifeline-incident-service
+
+server:
+  port: 8091
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+lifeline:
+  service:
+    name: incident
+    domain: intake
+    responsibility: Incident intake, triage request validation, and patient ownership boundaries.
+    owns:
+      - incidents
+      - incident ownership
+      - triage payloads
+    consumes:
+      - auth.user_context
+    publishes:
+      - incident.created
+      - incident.updated
+    public-apis:
+      - POST /api/incidents
+      - GET /api/incidents
+    dependencies:
+      - PostgreSQL/PostGIS
+      - audit-service

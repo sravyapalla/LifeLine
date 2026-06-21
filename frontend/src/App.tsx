@@ -31,6 +31,7 @@ import {
   getAuditEvents,
   getCurrentUser,
   getDashboardData,
+  getPlatformServices,
   getStoredAuthToken,
   login,
   publishOutboxEvents,
@@ -59,6 +60,7 @@ import type {
   OutboxEvent,
   OutboxPublishResponse,
   OutboxSummary,
+  PlatformServiceDescriptor,
   SimulationAssignment,
   SimulationRequestPayload,
   SimulationResult,
@@ -120,7 +122,7 @@ export default function App() {
   const [role, setRole] = useState<Role>(() => roleFromPath(window.location.pathname));
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
-  const [loginForm, setLoginForm] = useState({ username: 'control.demo', password: 'lifeline-demo' });
+  const [loginForm, setLoginForm] = useState({ username: 'control.demo', password: '' });
   const [loginError, setLoginError] = useState('');
   const [data, setData] = useState<DashboardState | null>(null);
   const [selectedIncidentId, setSelectedIncidentId] = useState('');
@@ -132,6 +134,7 @@ export default function App() {
   const [simulationForm, setSimulationForm] = useState<SimulationRequestPayload>(initialSimulationRequest);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [auditEvents, setAuditEvents] = useState<SecurityAuditEvent[]>([]);
+  const [platformServices, setPlatformServices] = useState<PlatformServiceDescriptor[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -141,8 +144,10 @@ export default function App() {
     const nextRole = roleFromPath(rolePath(currentRole), currentUser);
     const nextData = await getDashboardData(notificationRoleFor(nextRole), currentUser.role);
     const nextAuditEvents = currentUser.role === 'CONTROL' ? await getAuditEvents() : [];
+    const nextPlatformServices = currentUser.role === 'CONTROL' ? await loadPlatformServices() : [];
     setData(nextData);
     setAuditEvents(nextAuditEvents);
+    setPlatformServices(nextPlatformServices);
     setSimulationResult((current) => current ?? nextData.simulations[0] ?? null);
     setCapacityDrafts(Object.fromEntries(nextData.hospitals.map((hospital) => [hospital.id, hospital.availableBeds])));
     setSelectedIncidentId((current) => {
@@ -234,6 +239,7 @@ export default function App() {
     setUser(null);
     setData(null);
     setAuditEvents([]);
+    setPlatformServices([]);
     setSelectedIncidentId('');
     setSelectedTripId('');
     setLastDecision(null);
@@ -533,6 +539,7 @@ export default function App() {
           lastDecision={lastDecision}
           lastOutboxPublish={lastOutboxPublish}
           auditEvents={auditEvents}
+          platformServices={platformServices}
           busy={busy}
         />
       )}
@@ -550,6 +557,15 @@ export default function App() {
       )}
     </main>
   );
+}
+
+async function loadPlatformServices() {
+  try {
+    const response = await getPlatformServices();
+    return response.services;
+  } catch {
+    return [];
+  }
 }
 
 function LoginView({
@@ -601,7 +617,7 @@ function LoginView({
               key={demoUser.username}
               className={`role-tab ${form.username === demoUser.username ? 'active' : ''}`}
               type="button"
-              onClick={() => setForm({ username: demoUser.username, password: 'lifeline-demo' })}
+              onClick={() => setForm({ ...form, username: demoUser.username })}
             >
               <span>{demoUser.label}</span>
             </button>
@@ -633,6 +649,8 @@ function PatientView({
   const selectedTrip = selectedIncident ? data?.trips.find((trip) => trip.incidentId === selectedIncident.id) ?? null : null;
   const assignedAmbulance = selectedTrip ? data?.ambulances.find((ambulance) => ambulance.id === selectedTrip.ambulanceId) : null;
   const receivingHospital = selectedTrip ? data?.hospitals.find((hospital) => hospital.id === selectedTrip.hospitalId) : null;
+  const availableAmbulances = data?.ambulances.filter((ambulance) => ambulance.status === 'AVAILABLE') ?? [];
+  const availableHospitals = data?.hospitals.filter((hospital) => hospital.availableBeds > 0) ?? [];
 
   return (
     <section className="role-layout patient-layout">
@@ -646,6 +664,8 @@ function PatientView({
         </div>
 
         <IncidentForm form={form} setForm={setForm} onSubmit={onCreateIncident} busy={busy} submitLabel="Request Ambulance" />
+
+        <PatientCoveragePanel ambulances={availableAmbulances} hospitals={availableHospitals} />
       </aside>
 
       <section className="map-stage">
@@ -677,6 +697,7 @@ function PatientView({
             <JourneySteps incident={selectedIncident} trip={selectedTrip ?? null} />
             {assignedAmbulance && <InfoLine label="Ambulance" value={`${assignedAmbulance.callSign} - ${assignedAmbulance.type}`} />}
             {receivingHospital && <InfoLine label="Hospital" value={receivingHospital.name} />}
+            {selectedTrip && <PatientTrackingPanel trip={selectedTrip} ambulance={assignedAmbulance ?? null} hospital={receivingHospital ?? null} />}
           </div>
         ) : (
           <div className="empty-state">No active request</div>
@@ -701,6 +722,63 @@ function PatientView({
         </div>
       </aside>
     </section>
+  );
+}
+
+function PatientCoveragePanel({ ambulances, hospitals }: { ambulances: Ambulance[]; hospitals: Hospital[] }) {
+  return (
+    <div className="coverage-panel">
+      <div className="panel-heading compact-heading">
+        <div>
+          <p className="eyebrow">Coverage</p>
+          <h3>Available Now</h3>
+        </div>
+        <MapPin size={18} />
+      </div>
+
+      <div className="coverage-grid">
+        <article>
+          <strong>{ambulances.length}</strong>
+          <span>Ambulances</span>
+        </article>
+        <article>
+          <strong>{hospitals.length}</strong>
+          <span>Hospitals</span>
+        </article>
+      </div>
+
+      <div className="coverage-list">
+        {ambulances.slice(0, 3).map((ambulance) => (
+          <div className="coverage-row" key={ambulance.id}>
+            <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
+            <span>
+              <strong>{ambulance.callSign}</strong>
+              <small>{ambulance.type} - {ambulance.baseStation}</small>
+            </span>
+          </div>
+        ))}
+        {hospitals.slice(0, 3).map((hospital) => (
+          <div className="coverage-row" key={hospital.id}>
+            <span className={`resource-dot ${hospital.availableBeds > 0 ? 'available' : 'offline'}`} />
+            <span>
+              <strong>{hospital.name}</strong>
+              <small>{hospital.availableBeds} beds - {hospital.specialties.slice(0, 2).join(', ')}</small>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PatientTrackingPanel({ trip, ambulance, hospital }: { trip: Trip; ambulance: Ambulance | null; hospital: Hospital | null }) {
+  return (
+    <div className="tracking-panel">
+      <InfoLine label="Pickup ETA" value={`${trip.pickupEtaMinutes} min`} />
+      <InfoLine label="Transfer ETA" value={`${trip.hospitalEtaMinutes} min`} />
+      {ambulance && <InfoLine label="Unit" value={ambulance.callSign} />}
+      {hospital && <InfoLine label="Receiving" value={hospital.name} />}
+    </div>
   );
 }
 
@@ -764,20 +842,37 @@ function DriverView({
   busy: boolean;
 }) {
   const selectedTrip = data?.trips.find((trip) => trip.id === selectedTripId) ?? null;
+  const ownAmbulance = data?.ambulances[0] ?? null;
+  const assignedTrips = data?.trips ?? [];
+  const receivingHospitals = data?.hospitals.filter((hospital) => hospital.availableBeds > 0) ?? [];
 
   return (
     <section className="role-layout driver-layout">
       <aside className="panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Fleet</p>
-            <h2>Ambulances</h2>
+            <p className="eyebrow">Driver</p>
+            <h2>My Unit</h2>
           </div>
           <AmbulanceIcon size={18} />
         </div>
 
-        <div className="resource-list">
-          {data?.ambulances.map((ambulance) => (
+        {ownAmbulance ? (
+          <DriverUnitPanel
+            ambulance={ownAmbulance}
+            liveLocation={data?.liveLocations.find((location) => location.ambulanceId === ownAmbulance.id) ?? null}
+            activeTrip={selectedTrip}
+            onMoveAmbulance={onMoveAmbulance}
+            busy={busy}
+          />
+        ) : (
+          <div className="empty-state">No ambulance assigned</div>
+        )}
+
+        {data && data.ambulances.length > 1 && (
+          <div className="resource-list bordered">
+            <h3>Nearby Units</h3>
+            {data.ambulances.slice(1, 4).map((ambulance) => (
             <LiveAmbulanceRow
               key={ambulance.id}
               ambulance={ambulance}
@@ -785,25 +880,27 @@ function DriverView({
               onMoveAmbulance={onMoveAmbulance}
               busy={busy}
             />
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </aside>
 
       <section className="panel wide-panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Driver</p>
-            <h2>Assigned Trips</h2>
+            <p className="eyebrow">Requests</p>
+            <h2>Patient Assignments</h2>
           </div>
-          <Navigation size={18} />
+          <span className="count">{assignedTrips.length}</span>
         </div>
 
+        {assignedTrips.length === 0 && <div className="empty-state">No assigned patient requests</div>}
         <div className="trip-grid">
-          {data?.trips.map((trip) => (
+          {assignedTrips.map((trip) => (
             <TripCard
               key={trip.id}
               trip={trip}
-              data={data}
+              data={data!}
               selected={trip.id === selectedTripId}
               onSelect={() => setSelectedTripId(trip.id)}
               actions={<DriverActions trip={trip} onTripStatus={onTripStatus} busy={busy} />}
@@ -815,11 +912,14 @@ function DriverView({
       <aside className="panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Route</p>
-            <h2>Trip Map</h2>
+            <p className="eyebrow">Receiving</p>
+            <h2>Hospitals</h2>
           </div>
-          <MapPin size={18} />
+          <HospitalIcon size={18} />
         </div>
+
+        <DriverHospitalPanel hospitals={receivingHospitals} selectedTrip={selectedTrip} />
+
         <MapPanel
           ambulances={data?.ambulances ?? []}
           liveLocations={data?.liveLocations ?? []}
@@ -832,6 +932,53 @@ function DriverView({
         />
       </aside>
     </section>
+  );
+}
+
+function DriverUnitPanel({
+  ambulance,
+  liveLocation,
+  activeTrip,
+  onMoveAmbulance,
+  busy
+}: {
+  ambulance: Ambulance;
+  liveLocation: AmbulanceLocationSnapshot | null;
+  activeTrip: Trip | null;
+  onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="driver-unit">
+      <div className="unit-card">
+        <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
+        <div>
+          <h3>{ambulance.callSign}</h3>
+          <p>{ambulance.type} - {formatStatus(ambulance.status)}</p>
+        </div>
+      </div>
+      <InfoLine label="Station" value={ambulance.baseStation} />
+      <InfoLine label="Location" value={liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : 'Base snapshot'} />
+      {activeTrip && <InfoLine label="Current Trip" value={activeTrip.id} />}
+      <LiveAmbulanceRow ambulance={ambulance} liveLocation={liveLocation} onMoveAmbulance={onMoveAmbulance} busy={busy} />
+    </div>
+  );
+}
+
+function DriverHospitalPanel({ hospitals, selectedTrip }: { hospitals: Hospital[]; selectedTrip: Trip | null }) {
+  return (
+    <div className="driver-hospital-list">
+      {hospitals.length === 0 && <div className="empty-state compact">No receiving capacity visible</div>}
+      {hospitals.slice(0, 5).map((hospital) => (
+        <article className={`receiving-row ${hospital.id === selectedTrip?.hospitalId ? 'selected' : ''}`} key={hospital.id}>
+          <span className={`resource-dot ${hospital.availableBeds > 0 ? 'available' : 'offline'}`} />
+          <span>
+            <strong>{hospital.name}</strong>
+            <small>{hospital.availableBeds}/{hospital.totalBeds} beds - {hospital.specialties.slice(0, 2).join(', ')}</small>
+          </span>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -848,55 +995,98 @@ function HospitalView({
   onHospitalCapacity: (hospitalId: string, availableBeds: number) => void;
   busy: boolean;
 }) {
+  if (!data || data.hospitals.length === 0) {
+    return <div className="empty-state">No hospital assigned</div>;
+  }
+
+  const hospital = data.hospitals[0];
+  const incomingTrips = data.trips.filter((trip) => trip.hospitalId === hospital.id && activeTripStatuses.includes(trip.status));
+  const draft = capacityDrafts[hospital.id] ?? hospital.availableBeds;
+  const loadPercent = hospital.totalBeds === 0 ? 0 : Math.round(((hospital.totalBeds - hospital.availableBeds) / hospital.totalBeds) * 100);
+
   return (
-    <section className="hospital-grid">
-      {data?.hospitals.map((hospital) => {
-        const incomingTrips = data.trips.filter((trip) => trip.hospitalId === hospital.id && activeTripStatuses.includes(trip.status));
-        const draft = capacityDrafts[hospital.id] ?? hospital.availableBeds;
+    <section className="role-layout hospital-ops-layout">
+      <aside className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">{hospital.id}</p>
+            <h2>{hospital.name}</h2>
+          </div>
+          <span className={`capacity-pill ${hospital.availableBeds === 0 ? 'exhausted' : ''}`}>{hospital.availableBeds}/{hospital.totalBeds}</span>
+        </div>
 
-        return (
-          <article className="panel hospital-card" key={hospital.id}>
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">{hospital.id}</p>
-                <h2>{hospital.name}</h2>
-              </div>
-              <span className={`capacity-pill ${hospital.availableBeds === 0 ? 'exhausted' : ''}`}>{hospital.availableBeds}/{hospital.totalBeds}</span>
-            </div>
+        <div className="hospital-load-card">
+          <strong>{loadPercent}%</strong>
+          <span>Capacity Used</span>
+          <div>
+            <i style={{ width: `${Math.min(100, loadPercent)}%` }} />
+          </div>
+        </div>
 
-            <div className="specialty-row">
-              {hospital.specialties.map((specialty) => <span key={specialty}>{specialty}</span>)}
-            </div>
+        <div className="specialty-row">
+          {hospital.specialties.map((specialty) => <span key={specialty}>{specialty}</span>)}
+        </div>
 
-            <div className="capacity-control">
-              <label>
-                Beds
-                <input
-                  type="number"
-                  min={0}
-                  max={hospital.totalBeds}
-                  value={draft}
-                  onChange={(event) => setCapacityDrafts({ ...capacityDrafts, [hospital.id]: Number(event.target.value) })}
-                />
-              </label>
-              <button className="primary-button" type="button" onClick={() => onHospitalCapacity(hospital.id, draft)} disabled={busy}>
-                Update
-              </button>
-              <button className="ghost-button full-width" type="button" onClick={() => onHospitalCapacity(hospital.id, 0)} disabled={busy}>
-                Mark Exhausted
-              </button>
-            </div>
+        <div className="capacity-control">
+          <label>
+            Beds
+            <input
+              type="number"
+              min={0}
+              max={hospital.totalBeds}
+              value={draft}
+              onChange={(event) => setCapacityDrafts({ ...capacityDrafts, [hospital.id]: Number(event.target.value) })}
+            />
+          </label>
+          <button className="primary-button" type="button" onClick={() => onHospitalCapacity(hospital.id, draft)} disabled={busy}>
+            Update
+          </button>
+          <button className="ghost-button full-width" type="button" onClick={() => onHospitalCapacity(hospital.id, 0)} disabled={busy}>
+            Mark Exhausted
+          </button>
+        </div>
+      </aside>
 
-            <div className="compact-list">
-              <h3>Incoming</h3>
-              {incomingTrips.length === 0 && <div className="empty-state compact">No incoming trips</div>}
-              {incomingTrips.map((trip) => (
-                <HospitalTripRow key={trip.id} trip={trip} data={data} />
-              ))}
-            </div>
-          </article>
-        );
-      })}
+      <section className="panel wide-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Receiving</p>
+            <h2>Incoming Ambulances</h2>
+          </div>
+          <span className="count">{incomingTrips.length}</span>
+        </div>
+
+        <div className="hospital-incoming-board">
+          {incomingTrips.length === 0 && <div className="empty-state">No incoming ambulances</div>}
+          {incomingTrips.map((trip) => (
+            <HospitalTripRow key={trip.id} trip={trip} data={data} />
+          ))}
+        </div>
+      </section>
+
+      <aside className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Signals</p>
+            <h2>Receiving Map</h2>
+          </div>
+          <MapPin size={18} />
+        </div>
+
+        <InfoLine label="Available Beds" value={String(hospital.availableBeds)} />
+        <InfoLine label="Incoming Trips" value={String(incomingTrips.length)} />
+        <InfoLine label="Specialties" value={hospital.specialties.join(', ')} />
+        <MapPanel
+          ambulances={data.ambulances}
+          liveLocations={data.liveLocations}
+          hospitals={data.hospitals}
+          incidents={data.incidents}
+          trips={data.trips}
+          selectedIncidentId={incomingTrips[0]?.incidentId ?? ''}
+          selectedTripId={incomingTrips[0]?.id ?? ''}
+          compact
+        />
+      </aside>
     </section>
   );
 }
@@ -916,6 +1106,7 @@ function ControlView({
   lastDecision,
   lastOutboxPublish,
   auditEvents,
+  platformServices,
   busy
 }: {
   data: DashboardState | null;
@@ -932,6 +1123,7 @@ function ControlView({
   lastDecision: DispatchResponse | null;
   lastOutboxPublish: OutboxPublishResponse | null;
   auditEvents: SecurityAuditEvent[];
+  platformServices: PlatformServiceDescriptor[];
   busy: boolean;
 }) {
   return (
@@ -944,6 +1136,8 @@ function ControlView({
           </div>
           <span className="count">{data?.incidents.length ?? 0}</span>
         </div>
+
+        <ControlCommandSummary data={data} />
 
         <div className="incident-list">
           {data?.incidents.map((incident) => (
@@ -1054,8 +1248,38 @@ function ControlView({
         <Timeline events={data?.outboxEvents ?? []} decisions={data?.dispatchDecisions ?? []} />
 
         <AuditPanel events={auditEvents} />
+
+        <PlatformServicesPanel services={platformServices} />
       </aside>
     </section>
+  );
+}
+
+function ControlCommandSummary({ data }: { data: DashboardState | null }) {
+  const openIncidents = data?.incidents.filter((incident) => incident.status === 'NEW').length ?? 0;
+  const activeTrips = data?.trips.filter((trip) => activeTripStatuses.includes(trip.status)).length ?? 0;
+  const exhaustedHospitals = data?.hospitals.filter((hospital) => hospital.availableBeds === 0).length ?? 0;
+  const availableAmbulances = data?.ambulances.filter((ambulance) => ambulance.status === 'AVAILABLE').length ?? 0;
+
+  return (
+    <div className="command-summary">
+      <article>
+        <strong>{openIncidents}</strong>
+        <span>Open</span>
+      </article>
+      <article>
+        <strong>{activeTrips}</strong>
+        <span>Active</span>
+      </article>
+      <article>
+        <strong>{availableAmbulances}</strong>
+        <span>Units</span>
+      </article>
+      <article className={exhaustedHospitals > 0 ? 'attention' : ''}>
+        <strong>{exhaustedHospitals}</strong>
+        <span>Exhausted</span>
+      </article>
+    </div>
   );
 }
 
@@ -1598,6 +1822,33 @@ function AuditPanel({ events }: { events: SecurityAuditEvent[] }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function PlatformServicesPanel({ services }: { services: PlatformServiceDescriptor[] }) {
+  if (services.length === 0) return null;
+
+  return (
+    <div className="platform-panel">
+      <div className="panel-heading compact-heading">
+        <div>
+          <p className="eyebrow">Runtime</p>
+          <h3>Services</h3>
+        </div>
+        <RadioTower size={18} />
+      </div>
+      <div className="service-list">
+        {services.map((service) => (
+          <article className="service-row" key={service.name}>
+            <span>
+              <strong>{service.name}</strong>
+              <small>{service.responsibility}</small>
+            </span>
+            <em>{service.baseUrl.replace(/^https?:\/\//, '')}</em>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }

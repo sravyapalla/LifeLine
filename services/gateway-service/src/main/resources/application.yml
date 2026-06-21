@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: lifeline-gateway-service
+
+server:
+  port: 8088
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+lifeline:
+  gateway:
+    allowed-origins: ${LIFELINE_ALLOWED_ORIGINS:http://localhost:5173}
+    operations-url: ${LIFELINE_OPERATIONS_URL:http://localhost:8080}
+    incident-url: ${LIFELINE_INCIDENT_URL:http://localhost:8091}
+    resource-url: ${LIFELINE_RESOURCE_URL:http://localhost:8092}
+    dispatch-url: ${LIFELINE_DISPATCH_URL:http://localhost:8093}
+    notification-url: ${LIFELINE_NOTIFICATION_URL:http://localhost:8094}
+    audit-url: ${LIFELINE_AUDIT_URL:http://localhost:8095}
+    simulation-url: ${LIFELINE_SIMULATION_URL:http://localhost:8096}

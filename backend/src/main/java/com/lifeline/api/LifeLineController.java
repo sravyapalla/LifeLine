@@ -546,6 +546,11 @@ public class LifeLineController {
         Set<String> ambulanceIds = visibleTrips(user).stream()
                 .map(Trip::ambulanceId)
                 .collect(Collectors.toSet());
+        if (user.role() == UserRole.PATIENT) {
+            return ambulances.stream()
+                    .filter(ambulance -> ambulance.status() == AmbulanceStatus.AVAILABLE || ambulanceIds.contains(ambulance.id()))
+                    .toList();
+        }
         return ambulances.stream()
                 .filter(ambulance -> ambulanceIds.contains(ambulance.id()))
                 .toList();
@@ -564,6 +569,16 @@ public class LifeLineController {
         Set<String> hospitalIds = visibleTrips(user).stream()
                 .map(Trip::hospitalId)
                 .collect(Collectors.toSet());
+        if (user.role() == UserRole.DRIVER) {
+            return hospitals.stream()
+                    .filter(hospital -> hospital.hasCapacity() || hospitalIds.contains(hospital.id()))
+                    .toList();
+        }
+        if (user.role() == UserRole.PATIENT) {
+            return hospitals.stream()
+                    .filter(hospital -> hospital.hasCapacity() || hospitalIds.contains(hospital.id()))
+                    .toList();
+        }
         return hospitals.stream()
                 .filter(hospital -> hospitalIds.contains(hospital.id()))
                 .toList();

@@ -1,0 +1,38 @@
+spring:
+  application:
+    name: lifeline-resource-service
+
+server:
+  port: 8092
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+lifeline:
+  service:
+    name: resource
+    domain: fleet-capacity
+    responsibility: Ambulance fleet state, Redis live locations, and hospital capacity ownership.
+    owns:
+      - ambulances
+      - ambulance live locations
+      - hospitals
+      - hospital capacity
+    consumes:
+      - auth.user_context
+      - trip.assignment
+    publishes:
+      - ambulance.location.updated
+      - hospital.capacity.updated
+    public-apis:
+      - GET /api/ambulances
+      - POST /api/ambulances/{id}/location
+      - GET /api/hospitals
+      - POST /api/hospitals/{id}/capacity
+    dependencies:
+      - PostgreSQL/PostGIS
+      - Redis
+      - audit-service

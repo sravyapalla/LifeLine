@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lifeline-config
+  namespace: lifeline
+data:
+  LIFELINE_ALLOWED_ORIGINS: "https://lifeline.example.com"
+  LIFELINE_DB_URL: "jdbc:postgresql://postgres.platform.svc.cluster.local:5432/lifeline"
+  LIFELINE_DB_USERNAME: "lifeline"
+  LIFELINE_REDIS_HOST: "redis.platform.svc.cluster.local"
+  LIFELINE_REDIS_PORT: "6379"
+  LIFELINE_KAFKA_BOOTSTRAP_SERVERS: "kafka.platform.svc.cluster.local:9092"
+  LIFELINE_OPERATIONS_URL: "http://operations-service:8080"
+  LIFELINE_INCIDENT_URL: "http://incident-service:8091"
+  LIFELINE_RESOURCE_URL: "http://resource-service:8092"
+  LIFELINE_DISPATCH_URL: "http://dispatch-service:8093"
+  LIFELINE_NOTIFICATION_URL: "http://notification-service:8094"
+  LIFELINE_AUDIT_URL: "http://audit-service:8095"
+  LIFELINE_SIMULATION_URL: "http://simulation-service:8096"
