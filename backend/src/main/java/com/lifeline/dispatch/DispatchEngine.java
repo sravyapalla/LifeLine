@@ -7,7 +7,8 @@ import com.lifeline.domain.EmergencyCondition;
 import com.lifeline.domain.Hospital;
 import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentPriority;
-import com.lifeline.domain.Location;
+import com.lifeline.routing.RouteEstimate;
+import com.lifeline.routing.RoutingProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -18,11 +19,14 @@ import java.util.List;
 public class DispatchEngine {
     private final double ambulanceSpeedKmph;
     private final double transferSpeedKmph;
+    private final RoutingProvider routingProvider;
 
     public DispatchEngine(
+            RoutingProvider routingProvider,
             @Value("${lifeline.dispatch.average-ambulance-speed-kmph:32}") double ambulanceSpeedKmph,
             @Value("${lifeline.dispatch.average-transfer-speed-kmph:28}") double transferSpeedKmph
     ) {
+        this.routingProvider = routingProvider;
         this.ambulanceSpeedKmph = ambulanceSpeedKmph;
         this.transferSpeedKmph = transferSpeedKmph;
     }
@@ -94,10 +98,10 @@ public class DispatchEngine {
     }
 
     private CandidateScore score(Incident incident, Ambulance ambulance, Hospital hospital, AmbulanceType requiredType) {
-        double pickupDistanceKm = distanceKm(ambulance.location(), incident.location());
-        double hospitalDistanceKm = distanceKm(incident.location(), hospital.location());
-        double pickupEtaMinutes = minutesAtSpeed(pickupDistanceKm, ambulanceSpeedKmph);
-        double hospitalEtaMinutes = minutesAtSpeed(hospitalDistanceKm, transferSpeedKmph);
+        RouteEstimate pickupEstimate = routingProvider.estimate(ambulance.location(), incident.location(), ambulanceSpeedKmph);
+        RouteEstimate hospitalEstimate = routingProvider.estimate(incident.location(), hospital.location(), transferSpeedKmph);
+        double pickupEtaMinutes = pickupEstimate.etaMinutes();
+        double hospitalEtaMinutes = hospitalEstimate.etaMinutes();
         double loadPenalty = hospital.loadFactor() * 9;
         double qualityPenalty = (1 - hospital.qualityScore()) * 12;
         double typePenalty = Math.max(ambulance.type().level() - requiredType.level(), 0) * 1.2;
@@ -132,27 +136,6 @@ public class DispatchEngine {
             case TRAUMA -> priority == IncidentPriority.HIGH ? AmbulanceType.ALS : AmbulanceType.BLS;
             case PEDIATRIC, GENERAL -> AmbulanceType.BLS;
         };
-    }
-
-    private double minutesAtSpeed(double distanceKm, double kmph) {
-        if (kmph <= 0) {
-            return Double.MAX_VALUE;
-        }
-        return distanceKm / kmph * 60;
-    }
-
-    private double distanceKm(Location from, Location to) {
-        double earthRadiusKm = 6371;
-        double dLat = Math.toRadians(to.latitude() - from.latitude());
-        double dLng = Math.toRadians(to.longitude() - from.longitude());
-        double lat1 = Math.toRadians(from.latitude());
-        double lat2 = Math.toRadians(to.latitude());
-
-        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
-                + Math.cos(lat1) * Math.cos(lat2)
-                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return earthRadiusKm * c;
     }
 
     private double round(double value) {
