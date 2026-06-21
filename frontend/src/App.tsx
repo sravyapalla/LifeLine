@@ -12,6 +12,7 @@ import {
   ClipboardList,
   HeartPulse,
   Hospital as HospitalIcon,
+  LogOut,
   MapPin,
   Navigation,
   RadioTower,
@@ -24,9 +25,14 @@ import {
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet';
 import {
   acknowledgeNotification,
+  clearAuthToken,
   createIncident,
   dispatchIncident,
+  getAuditEvents,
+  getCurrentUser,
   getDashboardData,
+  getStoredAuthToken,
+  login,
   publishOutboxEvents,
   rerouteTrip,
   resetDemo,
@@ -38,6 +44,7 @@ import {
 import type {
   Ambulance,
   AmbulanceLocationSnapshot,
+  AuthenticatedUser,
   CreateIncidentPayload,
   DispatchAuditRecord,
   DispatchResponse,
@@ -47,6 +54,7 @@ import type {
   IncidentPriority,
   Metrics,
   Notification,
+  NotificationRole,
   OptimizationStrategy,
   OutboxEvent,
   OutboxPublishResponse,
@@ -55,6 +63,7 @@ import type {
   SimulationRequestPayload,
   SimulationResult,
   SimulationStrategyResult,
+  SecurityAuditEvent,
   Trip,
   TripStatus
 } from './types';
@@ -109,6 +118,10 @@ const initialSimulationRequest: SimulationRequestPayload = {
 
 export default function App() {
   const [role, setRole] = useState<Role>(() => roleFromPath(window.location.pathname));
+  const [authReady, setAuthReady] = useState(false);
+  const [user, setUser] = useState<AuthenticatedUser | null>(null);
+  const [loginForm, setLoginForm] = useState({ username: 'control.demo', password: 'lifeline-demo' });
+  const [loginError, setLoginError] = useState('');
   const [data, setData] = useState<DashboardState | null>(null);
   const [selectedIncidentId, setSelectedIncidentId] = useState('');
   const [selectedTripId, setSelectedTripId] = useState('');
@@ -118,13 +131,18 @@ export default function App() {
   const [lastOutboxPublish, setLastOutboxPublish] = useState<OutboxPublishResponse | null>(null);
   const [simulationForm, setSimulationForm] = useState<SimulationRequestPayload>(initialSimulationRequest);
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
+  const [auditEvents, setAuditEvents] = useState<SecurityAuditEvent[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  async function load() {
+  async function load(currentUser = user, currentRole = role) {
+    if (!currentUser) return;
     setError('');
-    const nextData = await getDashboardData(notificationRoleFor(role));
+    const nextRole = roleFromPath(rolePath(currentRole), currentUser);
+    const nextData = await getDashboardData(notificationRoleFor(nextRole), currentUser.role);
+    const nextAuditEvents = currentUser.role === 'CONTROL' ? await getAuditEvents() : [];
     setData(nextData);
+    setAuditEvents(nextAuditEvents);
     setSimulationResult((current) => current ?? nextData.simulations[0] ?? null);
     setCapacityDrafts(Object.fromEntries(nextData.hospitals.map((hospital) => [hospital.id, hospital.availableBeds])));
     setSelectedIncidentId((current) => {
@@ -140,17 +158,42 @@ export default function App() {
   }
 
   useEffect(() => {
+    const token = getStoredAuthToken();
+    if (!token) {
+      setAuthReady(true);
+      return;
+    }
+
+    getCurrentUser()
+      .then((nextUser) => {
+        const nextRole = roleFromPath(window.location.pathname, nextUser);
+        setUser(nextUser);
+        setRole(nextRole);
+        window.history.replaceState(null, '', rolePath(nextRole));
+      })
+      .catch(() => {
+        clearAuthToken();
+        setUser(null);
+      })
+      .finally(() => setAuthReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (!authReady || !user) return;
     load().catch((loadError: Error) => setError(loadError.message));
-  }, [role]);
+  }, [authReady, role, user?.username]);
 
   useEffect(() => {
     function syncPath() {
-      setRole(roleFromPath(window.location.pathname));
+      if (!user) return;
+      const nextRole = roleFromPath(window.location.pathname, user);
+      setRole(nextRole);
+      window.history.replaceState(null, '', rolePath(nextRole));
     }
 
     window.addEventListener('popstate', syncPath);
     return () => window.removeEventListener('popstate', syncPath);
-  }, []);
+  }, [user]);
 
   const selectedIncident = useMemo(
     () => data?.incidents.find((incident) => incident.id === selectedIncidentId) ?? null,
@@ -163,8 +206,41 @@ export default function App() {
   );
 
   function navigateRole(nextRole: Role) {
+    if (!user || !allowedRolesForUser(user).includes(nextRole)) return;
     setRole(nextRole);
     window.history.pushState(null, '', rolePath(nextRole));
+  }
+
+  async function handleLogin() {
+    setBusy(true);
+    setLoginError('');
+    try {
+      const response = await login(loginForm);
+      const nextRole = roleFromPath(window.location.pathname, response.user);
+      setUser(response.user);
+      setRole(nextRole);
+      setError('');
+      window.history.replaceState(null, '', rolePath(nextRole));
+    } catch (authError) {
+      setLoginError((authError as Error).message);
+    } finally {
+      setBusy(false);
+      setAuthReady(true);
+    }
+  }
+
+  function handleLogout() {
+    clearAuthToken();
+    setUser(null);
+    setData(null);
+    setAuditEvents([]);
+    setSelectedIncidentId('');
+    setSelectedTripId('');
+    setLastDecision(null);
+    setLastOutboxPublish(null);
+    setSimulationResult(null);
+    setRole('patient');
+    window.history.replaceState(null, '', '/');
   }
 
   async function handleCreateIncident() {
@@ -174,7 +250,9 @@ export default function App() {
       const incident = await createIncident(form);
       await load();
       setSelectedIncidentId(incident.id);
-      navigateRole('control');
+      if (user?.role === 'CONTROL') {
+        navigateRole('control');
+      }
     } catch (createError) {
       setError((createError as Error).message);
     } finally {
@@ -322,17 +400,38 @@ export default function App() {
 
   const metrics = data?.metrics;
   const activeTrips = data?.trips.filter((trip) => activeTripStatuses.includes(trip.status)) ?? [];
+  const visibleRoles = user ? roles.filter((item) => allowedRolesForUser(user).includes(item.id)) : [];
+
+  if (!authReady) {
+    return (
+      <main className="shell">
+        <div className="loading-panel">Loading LifeLine...</div>
+      </main>
+    );
+  }
+
+  if (!user) {
+    return (
+      <LoginView
+        form={loginForm}
+        setForm={setLoginForm}
+        onLogin={handleLogin}
+        busy={busy}
+        error={loginError}
+      />
+    );
+  }
 
   return (
     <main className="shell">
       <header className="topbar">
         <div className="brand-block">
-          <p className="eyebrow">LifeLine V5</p>
-          <h1>Ops Simulator</h1>
+          <p className="eyebrow">LifeLine V6</p>
+          <h1>Production Trust</h1>
         </div>
 
         <nav className="role-tabs" aria-label="Role navigation">
-          {roles.map((item) => (
+          {visibleRoles.map((item) => (
             <button
               key={item.id}
               className={`role-tab ${role === item.id ? 'active' : ''}`}
@@ -346,12 +445,19 @@ export default function App() {
         </nav>
 
         <div className="actions">
+          <div className="user-badge">
+            <strong>{user.displayName}</strong>
+            <span>{formatStatus(user.role)}</span>
+          </div>
           <button className="icon-button" type="button" onClick={() => load().catch((loadError: Error) => setError(loadError.message))} aria-label="Refresh dashboard" title="Refresh dashboard">
             <RefreshCw size={18} />
           </button>
-          <button className="ghost-button" type="button" onClick={handleReset} disabled={busy}>
+          {user.role === 'CONTROL' && <button className="ghost-button" type="button" onClick={handleReset} disabled={busy}>
             <RotateCcw size={16} />
             Reset
+          </button>}
+          <button className="icon-button" type="button" onClick={handleLogout} aria-label="Log out" title="Log out">
+            <LogOut size={18} />
           </button>
         </div>
       </header>
@@ -407,7 +513,6 @@ export default function App() {
           capacityDrafts={capacityDrafts}
           setCapacityDrafts={setCapacityDrafts}
           onHospitalCapacity={handleHospitalCapacity}
-          onReroute={handleReroute}
           busy={busy}
         />
       )}
@@ -427,6 +532,7 @@ export default function App() {
           onPublishOutbox={handlePublishOutbox}
           lastDecision={lastDecision}
           lastOutboxPublish={lastOutboxPublish}
+          auditEvents={auditEvents}
           busy={busy}
         />
       )}
@@ -442,6 +548,66 @@ export default function App() {
           busy={busy}
         />
       )}
+    </main>
+  );
+}
+
+function LoginView({
+  form,
+  setForm,
+  onLogin,
+  busy,
+  error
+}: {
+  form: { username: string; password: string };
+  setForm: (form: { username: string; password: string }) => void;
+  onLogin: () => void;
+  busy: boolean;
+  error: string;
+}) {
+  const demoUsers = [
+    { username: 'patient.demo', label: 'Patient' },
+    { username: 'driver.demo', label: 'Driver' },
+    { username: 'hospital.demo', label: 'Hospital' },
+    { username: 'control.demo', label: 'Control' }
+  ];
+
+  return (
+    <main className="login-shell">
+      <section className="login-panel">
+        <div className="brand-block">
+          <p className="eyebrow">LifeLine V6</p>
+          <h1>Production Trust</h1>
+        </div>
+
+        <div className="login-form">
+          <label>
+            Username
+            <input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} />
+          </label>
+          <label>
+            Password
+            <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
+          </label>
+          <button className="primary-button" type="button" onClick={onLogin} disabled={busy}>
+            Sign In
+          </button>
+          {error && <div className="alert compact-alert">{error}</div>}
+        </div>
+
+        <div className="demo-user-grid">
+          {demoUsers.map((demoUser) => (
+            <button
+              key={demoUser.username}
+              className={`role-tab ${form.username === demoUser.username ? 'active' : ''}`}
+              type="button"
+              onClick={() => setForm({ username: demoUser.username, password: 'lifeline-demo' })}
+            >
+              <span>{demoUser.label}</span>
+            </button>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }
@@ -674,14 +840,12 @@ function HospitalView({
   capacityDrafts,
   setCapacityDrafts,
   onHospitalCapacity,
-  onReroute,
   busy
 }: {
   data: DashboardState | null;
   capacityDrafts: Record<string, number>;
   setCapacityDrafts: (drafts: Record<string, number>) => void;
   onHospitalCapacity: (hospitalId: string, availableBeds: number) => void;
-  onReroute: (tripId: string) => void;
   busy: boolean;
 }) {
   return (
@@ -727,7 +891,7 @@ function HospitalView({
               <h3>Incoming</h3>
               {incomingTrips.length === 0 && <div className="empty-state compact">No incoming trips</div>}
               {incomingTrips.map((trip) => (
-                <HospitalTripRow key={trip.id} trip={trip} data={data} onReroute={onReroute} busy={busy} />
+                <HospitalTripRow key={trip.id} trip={trip} data={data} />
               ))}
             </div>
           </article>
@@ -751,6 +915,7 @@ function ControlView({
   onPublishOutbox,
   lastDecision,
   lastOutboxPublish,
+  auditEvents,
   busy
 }: {
   data: DashboardState | null;
@@ -766,6 +931,7 @@ function ControlView({
   onPublishOutbox: () => void;
   lastDecision: DispatchResponse | null;
   lastOutboxPublish: OutboxPublishResponse | null;
+  auditEvents: SecurityAuditEvent[];
   busy: boolean;
 }) {
   return (
@@ -886,6 +1052,8 @@ function ControlView({
         />
 
         <Timeline events={data?.outboxEvents ?? []} decisions={data?.dispatchDecisions ?? []} />
+
+        <AuditPanel events={auditEvents} />
       </aside>
     </section>
   );
@@ -1222,7 +1390,7 @@ function DriverActions({ trip, onTripStatus, busy }: { trip: Trip; onTripStatus:
   return <button className="ghost-button full-width" type="button" disabled>{formatStatus(trip.status)}</button>;
 }
 
-function HospitalTripRow({ trip, data, onReroute, busy }: { trip: Trip; data: DashboardState; onReroute: (tripId: string) => void; busy: boolean }) {
+function HospitalTripRow({ trip, data }: { trip: Trip; data: DashboardState }) {
   const incident = data.incidents.find((candidate) => candidate.id === trip.incidentId);
   const ambulance = data.ambulances.find((candidate) => candidate.id === trip.ambulanceId);
 
@@ -1232,9 +1400,7 @@ function HospitalTripRow({ trip, data, onReroute, busy }: { trip: Trip; data: Da
         <strong>{incident?.patientName ?? trip.incidentId}</strong>
         <small>{ambulance?.callSign ?? trip.ambulanceId} - {formatStatus(trip.status)}</small>
       </div>
-      <button className="ghost-button" type="button" onClick={() => onReroute(trip.id)} disabled={busy}>
-        Reroute
-      </button>
+      <span className={`status-badge ${trip.status.toLowerCase()}`}>{formatStatus(trip.status)}</span>
     </div>
   );
 }
@@ -1409,6 +1575,33 @@ function Timeline({ events, decisions }: { events: OutboxEvent[]; decisions: Dis
   );
 }
 
+function AuditPanel({ events }: { events: SecurityAuditEvent[] }) {
+  return (
+    <div className="audit-panel">
+      <div className="panel-heading compact-heading">
+        <div>
+          <p className="eyebrow">Security</p>
+          <h3>Audit</h3>
+        </div>
+        <UserRound size={18} />
+      </div>
+      {events.length === 0 && <div className="empty-state compact">No audit events</div>}
+      {events.slice(0, 8).map((event) => (
+        <div className={`audit-row ${event.outcome.toLowerCase()}`} key={event.id}>
+          <span>
+            <strong>{event.action}</strong>
+            <small>{event.actorUserId} - {event.actorRole}</small>
+          </span>
+          <span>
+            <em>{event.outcome}</em>
+            <small>{event.resourceType} {event.resourceId}</small>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function JourneySteps({ incident, trip }: { incident: Incident; trip: Trip | null }) {
   const steps = [
     { label: 'Requested', done: true },
@@ -1557,17 +1750,38 @@ function AmbulanceMarker({
   );
 }
 
-function roleFromPath(pathname: string): Role {
+function roleFromPath(pathname: string, user?: AuthenticatedUser): Role {
   const role = pathname.replace('/', '') as Role;
-  return roles.some((candidate) => candidate.id === role) ? role : 'control';
+  if (!user) {
+    return roles.some((candidate) => candidate.id === role) ? role : 'patient';
+  }
+  const allowed = allowedRolesForUser(user);
+  return allowed.includes(role) ? role : allowed[0];
 }
 
 function rolePath(role: Role) {
   return `/${role}`;
 }
 
-function notificationRoleFor(role: Role) {
-  return role === 'simulation' ? 'control' : role;
+function notificationRoleFor(role: Role): NotificationRole {
+  return (role === 'simulation' ? 'CONTROL' : role.toUpperCase()) as NotificationRole;
+}
+
+function allowedRolesForUser(user: AuthenticatedUser): Role[] {
+  return switchRole(user.role);
+}
+
+function switchRole(role: AuthenticatedUser['role']): Role[] {
+  switch (role) {
+    case 'PATIENT':
+      return ['patient'];
+    case 'DRIVER':
+      return ['driver'];
+    case 'HOSPITAL':
+      return ['hospital'];
+    case 'CONTROL':
+      return ['control', 'simulation'];
+  }
 }
 
 function toggleSelection(values: string[], value: string) {

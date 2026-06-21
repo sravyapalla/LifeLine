@@ -1,29 +1,63 @@
 import type {
   Ambulance,
   AmbulanceLocationSnapshot,
+  AuthResponse,
+  AuthenticatedUser,
   CreateIncidentPayload,
   DispatchAuditRecord,
   DispatchResponse,
   Hospital,
   Incident,
+  LoginRequest,
   Metrics,
   Notification,
+  NotificationRole,
   OutboxEvent,
   OutboxPublishResponse,
   OutboxSummary,
+  SecurityAuditEvent,
   SimulationRequestPayload,
   SimulationResult,
   Trip,
   TripStatus,
-  UpdateAmbulanceLocationPayload
+  UpdateAmbulanceLocationPayload,
+  UserRole
 } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api';
+const TOKEN_KEY = 'lifeline.jwt';
+
+const emptyOutboxSummary: OutboxSummary = {
+  totalEvents: 0,
+  pendingEvents: 0,
+  publishedEvents: 0,
+  readyEvents: 0,
+  failedEvents: 0,
+  retryScheduledEvents: 0,
+  oldestPendingAgeSeconds: 0,
+  oldestPendingAt: null,
+  lastPublishedAt: null,
+  eventTypes: []
+};
+
+export function getStoredAuthToken() {
+  return window.localStorage.getItem(TOKEN_KEY);
+}
+
+export function setAuthToken(token: string) {
+  window.localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearAuthToken() {
+  window.localStorage.removeItem(TOKEN_KEY);
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getStoredAuthToken();
   const response = await fetch(`${API_BASE}${path}`, {
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...options?.headers
     },
     ...options
@@ -42,22 +76,60 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-export async function getDashboardData(role = 'control') {
-  const [ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications, simulations] = await Promise.all([
+export async function login(payload: LoginRequest) {
+  const response = await request<AuthResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  setAuthToken(response.token);
+  return response;
+}
+
+export function getCurrentUser() {
+  return request<AuthenticatedUser>('/auth/me');
+}
+
+export async function getDashboardData(role: NotificationRole, userRole: UserRole) {
+  const commonRequests = [
     request<Ambulance[]>('/ambulances'),
     request<AmbulanceLocationSnapshot[]>('/ambulance-locations'),
     request<Hospital[]>('/hospitals'),
     request<Incident[]>('/incidents'),
     request<Trip[]>('/trips'),
+    request<Metrics>('/metrics'),
+    request<Notification[]>(`/notifications?role=${role}`)
+  ] as const;
+
+  const [ambulances, liveLocations, hospitals, incidents, trips, metrics, notifications] = await Promise.all(commonRequests);
+
+  if (userRole !== 'CONTROL') {
+    return {
+      ambulances,
+      liveLocations,
+      hospitals,
+      incidents,
+      trips,
+      dispatchDecisions: [] as DispatchAuditRecord[],
+      outboxEvents: [] as OutboxEvent[],
+      outboxSummary: emptyOutboxSummary,
+      metrics,
+      notifications,
+      simulations: [] as SimulationResult[]
+    };
+  }
+
+  const [dispatchDecisions, outboxEvents, outboxSummary, simulations] = await Promise.all([
     request<DispatchAuditRecord[]>('/dispatch-decisions'),
     request<OutboxEvent[]>('/outbox-events'),
     request<OutboxSummary>('/outbox-events/summary'),
-    request<Metrics>('/metrics'),
-    request<Notification[]>(`/notifications?role=${role}`),
     request<SimulationResult[]>('/simulations')
   ]);
 
   return { ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications, simulations };
+}
+
+export function getAuditEvents(limit = 100) {
+  return request<SecurityAuditEvent[]>(`/audit-events?limit=${limit}`);
 }
 
 export function createIncident(payload: CreateIncidentPayload) {

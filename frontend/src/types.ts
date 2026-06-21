@@ -6,6 +6,7 @@ export type IncidentStatus = 'NEW' | 'ASSIGNED' | 'CANCELLED' | 'COMPLETED';
 export type TripStatus = 'RESERVED' | 'EN_ROUTE_PATIENT' | 'EN_ROUTE_HOSPITAL' | 'COMPLETED' | 'CANCELLED';
 export type NotificationRole = 'PATIENT' | 'DRIVER' | 'HOSPITAL' | 'CONTROL';
 export type OptimizationStrategy = 'GREEDY_SEQUENTIAL' | 'GLOBAL_MIN_COST';
+export type UserRole = 'PATIENT' | 'DRIVER' | 'HOSPITAL' | 'CONTROL';
 
 export interface Location {
   latitude: number;
@@ -223,4 +224,36 @@ export interface SimulationResult {
   request: SimulationRequestPayload;
   createdAt: string;
   strategyResults: SimulationStrategyResult[];
+}
+
+export interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+export interface AuthenticatedUser {
+  username: string;
+  displayName: string;
+  role: UserRole;
+  ambulanceId: string | null;
+  hospitalId: string | null;
+}
+
+export interface AuthResponse {
+  token: string;
+  expiresAt: string;
+  user: AuthenticatedUser;
+}
+
+export interface SecurityAuditEvent {
+  id: string;
+  actorUserId: string;
+  actorRole: string;
+  action: string;
+  resourceType: string;
+  resourceId: string;
+  outcome: string;
+  reason: string;
+  metadata: string;
+  createdAt: string;
 }

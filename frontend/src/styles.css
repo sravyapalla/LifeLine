@@ -31,6 +31,66 @@ button {
   padding: 22px;
 }
 
+.login-shell {
+  align-items: center;
+  display: grid;
+  min-height: 100vh;
+  padding: 22px;
+  place-items: center;
+}
+
+.login-panel {
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 20px;
+  max-width: 460px;
+  padding: 28px;
+  width: min(100%, 460px);
+}
+
+.login-form {
+  display: grid;
+  gap: 12px;
+}
+
+.login-form label {
+  color: #475569;
+  display: grid;
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.login-form input {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+  width: 100%;
+}
+
+.demo-user-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.loading-panel {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  color: #475569;
+  display: flex;
+  font-weight: 800;
+  justify-content: center;
+  margin: 20vh auto 0;
+  max-width: 360px;
+  min-height: 120px;
+}
+
 .topbar {
   align-items: center;
   display: grid;
@@ -110,6 +170,29 @@ button {
   justify-content: flex-end;
 }
 
+.user-badge {
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  min-height: 42px;
+  min-width: 138px;
+  padding: 6px 10px;
+}
+
+.user-badge strong {
+  font-size: 13px;
+  line-height: 1.1;
+}
+
+.user-badge span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
 .icon-button,
 .ghost-button,
 .primary-button {
@@ -160,6 +243,10 @@ button {
   margin: 0 auto 16px;
   max-width: 1560px;
   padding: 12px 14px;
+}
+
+.compact-alert {
+  margin: 0;
 }
 
 .metrics-grid {
@@ -1019,6 +1106,57 @@ button {
   margin-top: 16px;
 }
 
+.audit-panel {
+  border-top: 1px solid #e2e8f0;
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+}
+
+.audit-row {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 58px;
+  padding: 9px 10px;
+}
+
+.audit-row.denied {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.audit-row strong,
+.audit-row small,
+.audit-row em {
+  display: block;
+}
+
+.audit-row strong,
+.audit-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-row small {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.audit-row em {
+  color: #172033;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  text-align: right;
+}
+
 .outbox-panel {
   border-bottom: 1px solid #e2e8f0;
   border-top: 1px solid #e2e8f0;
@@ -1175,6 +1313,14 @@ button {
 }
 
 @media (max-width: 560px) {
+  .login-panel {
+    padding: 20px;
+  }
+
+  .demo-user-grid {
+    grid-template-columns: 1fr;
+  }
+
   .role-tabs {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1185,7 +1331,12 @@ button {
   }
 
   .actions {
+    flex-wrap: wrap;
     width: 100%;
+  }
+
+  .user-badge {
+    flex: 1 1 100%;
   }
 
   .ghost-button {
