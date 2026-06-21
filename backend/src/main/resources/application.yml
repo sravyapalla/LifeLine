@@ -28,6 +28,11 @@ management:
         include: health,info,metrics
 
 lifeline:
+  cors:
+    allowed-origins: ${LIFELINE_ALLOWED_ORIGINS:http://localhost:5173}
+  security:
+    jwt-secret: ${LIFELINE_JWT_SECRET}
+    token-ttl-minutes: 480
   dispatch:
     average-ambulance-speed-kmph: 32
     average-transfer-speed-kmph: 28

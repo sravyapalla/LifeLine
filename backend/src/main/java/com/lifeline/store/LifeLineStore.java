@@ -11,6 +11,7 @@ import com.lifeline.domain.Location;
 import com.lifeline.domain.Notification;
 import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
+import com.lifeline.domain.SecurityAuditEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
 import com.lifeline.simulation.SimulationResult;
@@ -36,6 +37,8 @@ public interface LifeLineStore {
 
     List<SimulationResult> simulations();
 
+    List<SecurityAuditEvent> securityAuditEvents(int limit);
+
     List<OutboxEvent> pendingOutboxEvents(int limit);
 
     List<OutboxEvent> claimReadyOutboxEvents(int limit, Instant claimedAt, Instant nextAttemptAt);
@@ -54,7 +57,18 @@ public interface LifeLineStore {
 
     Optional<SimulationResult> findSimulation(String id);
 
+    default Incident createIncident(
+            String patientName,
+            String phone,
+            EmergencyCondition condition,
+            IncidentPriority priority,
+            Location location
+    ) {
+        return createIncident("patient.demo", patientName, phone, condition, priority, location);
+    }
+
     Incident createIncident(
+            String requesterUserId,
             String patientName,
             String phone,
             EmergencyCondition condition,
@@ -92,6 +106,8 @@ public interface LifeLineStore {
     Notification acknowledgeNotification(String notificationId);
 
     SimulationResult saveSimulationResult(SimulationResult result);
+
+    SecurityAuditEvent addSecurityAuditEvent(SecurityAuditEvent event);
 
     void reset();
 }

@@ -43,6 +43,7 @@ CREATE TABLE hospital_specialties (
 
 CREATE TABLE incidents (
     id VARCHAR(40) PRIMARY KEY,
+    requester_user_id VARCHAR(120) NOT NULL DEFAULT 'patient.demo',
     patient_name VARCHAR(160) NOT NULL,
     phone VARCHAR(40) NOT NULL,
     condition VARCHAR(30) NOT NULL,
@@ -57,6 +58,7 @@ CREATE TABLE incidents (
 );
 
 CREATE INDEX incidents_status_created_idx ON incidents (status, created_at DESC);
+CREATE INDEX incidents_requester_user_idx ON incidents (requester_user_id, created_at DESC);
 CREATE INDEX incidents_location_postgis_idx
     ON incidents USING gist (ST_SetSRID(ST_MakePoint(longitude, latitude), 4326));
 
@@ -153,8 +155,7 @@ INSERT INTO hospital_specialties (hospital_id, condition) VALUES
 ('HOS-205', 'GENERAL')
 ON CONFLICT (hospital_id, condition) DO NOTHING;
 
-INSERT INTO incidents (id, patient_name, phone, condition, priority, latitude, longitude, created_at, status) VALUES
-('INC-301', 'Ananya Rao', '+91-90000-10001', 'CARDIAC', 'CRITICAL', 12.9458, 77.6309, now() - interval '3 minutes', 'NEW'),
-('INC-302', 'Rohan Mehta', '+91-90000-10002', 'TRAUMA', 'HIGH', 12.9166, 77.6101, now() - interval '90 seconds', 'NEW')
+INSERT INTO incidents (id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status) VALUES
+('INC-301', 'patient.demo', 'Ananya Rao', '+91-90000-10001', 'CARDIAC', 'CRITICAL', 12.9458, 77.6309, now() - interval '3 minutes', 'NEW'),
+('INC-302', 'patient.demo', 'Rohan Mehta', '+91-90000-10002', 'TRAUMA', 'HIGH', 12.9166, 77.6101, now() - interval '90 seconds', 'NEW')
 ON CONFLICT (id) DO NOTHING;
-

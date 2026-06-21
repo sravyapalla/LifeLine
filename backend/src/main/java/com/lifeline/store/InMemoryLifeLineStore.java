@@ -14,6 +14,7 @@ import com.lifeline.domain.Location;
 import com.lifeline.domain.Notification;
 import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
+import com.lifeline.domain.SecurityAuditEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
 import com.lifeline.simulation.SimulationResult;
@@ -42,6 +43,7 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     private final List<OutboxEvent> outboxEvents = new ArrayList<>();
     private final List<Notification> notifications = new ArrayList<>();
     private final List<SimulationResult> simulations = new ArrayList<>();
+    private final List<SecurityAuditEvent> securityAuditEvents = new ArrayList<>();
 
     @PostConstruct
     public void seed() {
@@ -71,8 +73,8 @@ public class InMemoryLifeLineStore implements LifeLineStore {
         addHospital(new Hospital("HOS-204", "Cloudnine Pediatric ER", new Location(12.9336, 77.6234), Set.of(EmergencyCondition.PEDIATRIC, EmergencyCondition.GENERAL), 35, 9, 0.89));
         addHospital(new Hospital("HOS-205", "Baptist North Care", new Location(13.0358, 77.5891), Set.of(EmergencyCondition.STROKE, EmergencyCondition.GENERAL), 44, 11, 0.84));
 
-        saveIncident(new Incident("INC-301", "Ananya Rao", "+91-90000-10001", EmergencyCondition.CARDIAC, IncidentPriority.CRITICAL, new Location(12.9458, 77.6309), Instant.now().minusSeconds(180), IncidentStatus.NEW));
-        saveIncident(new Incident("INC-302", "Rohan Mehta", "+91-90000-10002", EmergencyCondition.TRAUMA, IncidentPriority.HIGH, new Location(12.9166, 77.6101), Instant.now().minusSeconds(90), IncidentStatus.NEW));
+        saveIncident(new Incident("INC-301", "patient.demo", "Ananya Rao", "+91-90000-10001", EmergencyCondition.CARDIAC, IncidentPriority.CRITICAL, new Location(12.9458, 77.6309), Instant.now().minusSeconds(180), IncidentStatus.NEW));
+        saveIncident(new Incident("INC-302", "patient.demo", "Rohan Mehta", "+91-90000-10002", EmergencyCondition.TRAUMA, IncidentPriority.HIGH, new Location(12.9166, 77.6101), Instant.now().minusSeconds(90), IncidentStatus.NEW));
     }
 
     @Override
@@ -117,6 +119,14 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     public synchronized List<SimulationResult> simulations() {
         return simulations.stream()
                 .sorted(Comparator.comparing(SimulationResult::createdAt).reversed())
+                .toList();
+    }
+
+    @Override
+    public synchronized List<SecurityAuditEvent> securityAuditEvents(int limit) {
+        return securityAuditEvents.stream()
+                .sorted(Comparator.comparing(SecurityAuditEvent::createdAt).reversed())
+                .limit(limit)
                 .toList();
     }
 
@@ -191,6 +201,7 @@ public class InMemoryLifeLineStore implements LifeLineStore {
 
     @Override
     public synchronized Incident createIncident(
+            String requesterUserId,
             String patientName,
             String phone,
             EmergencyCondition condition,
@@ -199,7 +210,7 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     ) {
         String id = "INC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         Instant now = Instant.now();
-        Incident incident = new Incident(id, patientName, phone, condition, priority, location, now, IncidentStatus.NEW);
+        Incident incident = new Incident(id, requesterUserId, patientName, phone, condition, priority, location, now, IncidentStatus.NEW);
         incidents.put(id, incident);
         appendOutbox("Incident", id, "incident.created", "{\"incidentId\":\"%s\"}".formatted(id), now);
         return incident;
@@ -412,6 +423,12 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     public synchronized SimulationResult saveSimulationResult(SimulationResult result) {
         simulations.addFirst(result);
         return result;
+    }
+
+    @Override
+    public synchronized SecurityAuditEvent addSecurityAuditEvent(SecurityAuditEvent event) {
+        securityAuditEvents.addFirst(event);
+        return event;
     }
 
     private void addAmbulance(Ambulance ambulance) {
