@@ -205,15 +205,29 @@ This design avoids losing events when the database succeeds but the broker or do
 
 ```powershell
 cd C:\Users\sravya\LifeLine
-$env:LIFELINE_JWT_SECRET="replace-with-a-long-local-secret"
-$env:LIFELINE_DEMO_PASSWORD="choose-a-local-demo-password"
+Copy-Item .env.example .env
+```
+
+Edit `.env` and replace every `replace-with-*` value. Then start the full distributed runtime:
+
+```powershell
+docker compose up --build
+```
+
+The frontend is available at `http://localhost:5173` and calls the gateway at `http://localhost:8088/api`.
+
+For a faster backend-only loop, start only infrastructure:
+
+```powershell
 docker compose up -d postgres redis kafka
 ```
 
-Run the backend:
+Then run the operations backend on the host:
 
 ```powershell
 cd backend
+$env:LIFELINE_JWT_SECRET="replace-with-a-long-local-secret"
+$env:LIFELINE_DEMO_PASSWORD="choose-a-local-demo-password"
 mvn.cmd spring-boot:run
 ```
 
@@ -222,6 +236,7 @@ Run the frontend:
 ```powershell
 cd frontend
 npm install
+$env:VITE_API_BASE_URL="http://localhost:8080/api"
 npm run dev
 ```
 
