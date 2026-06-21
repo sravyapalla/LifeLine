@@ -5,6 +5,8 @@ spring:
       - org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration
 
 lifeline:
+  security:
+    jwt-secret: ${LIFELINE_JWT_SECRET:dev-only-local-lifeline-secret-change-me}
   outbox:
     publisher:
       mode: logging

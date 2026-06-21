@@ -599,11 +599,13 @@ V6 auth and CORS defaults:
 ```yaml
 lifeline:
   security:
-    jwt-secret: ${LIFELINE_JWT_SECRET:dev-only-local-lifeline-secret-change-me}
+    jwt-secret: ${LIFELINE_JWT_SECRET}
     token-ttl-minutes: 480
   cors:
     allowed-origins: ${LIFELINE_ALLOWED_ORIGINS:http://localhost:5173}
 ```
+
+The `memory` profile supplies a dev-only JWT secret fallback. The full PostgreSQL/Redis/Kafka runtime expects `LIFELINE_JWT_SECRET` to be set.
 
 V5 simulation rules:
 
@@ -639,6 +641,7 @@ Then run the backend:
 
 ```powershell
 cd backend
+$env:LIFELINE_JWT_SECRET="replace-with-a-long-local-secret"
 mvn spring-boot:run
 ```
 
