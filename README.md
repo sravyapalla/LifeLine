@@ -57,7 +57,9 @@ The product direction is intentionally pragmatic: build a correct, explainable d
 - Metrics for pending and published outbox events
 - Event health summary with backlog age and event-type counts
 - Retry state with publish attempts, last failure reason, and next retry time
-- Publisher abstraction to separate event delivery from outbox state management
+- Configurable publisher abstraction to separate event delivery from outbox state management
+- Failure-demo publisher mode for exercising retry behavior locally
+- Opt-in PostgreSQL/Testcontainers integration test for JDBC outbox retry state
 - Control Tower outbox reliability panel with manual publish action
 - Timeline visibility for pending versus published event state
 
@@ -230,7 +232,7 @@ backend/
       event-type breakdown
 
     OutboxPublisher
-      current logging publisher
+      configurable logging/failure demo publisher
       future notification or broker adapter boundary
 
   store
@@ -299,6 +301,7 @@ frontend/
 | D23 | Use `SKIP LOCKED` for PostgreSQL outbox batches | Future workers should be able to claim pending events concurrently without double-publishing the same row. |
 | D24 | Expose outbox health through product UI, not logs only | Operators should see backlog age, last publish time, and event-type pressure directly inside the Control Tower. |
 | D25 | Record outbox retry state before adding external delivery adapters | Attempts, last failure reason, and next retry time make failures debuggable before Kafka, notifications, or webhooks are introduced. |
+| D26 | Keep external delivery adapters out of V4 runtime | V4 should prove claim, retry, and observability contracts first. Notification, Redis, and broker adapters can build on this in V5+ without changing the outbox core. |
 
 ## V2 Data Ownership
 
@@ -351,6 +354,37 @@ Current APIs:
 - `POST /api/trips/{tripId}/reroute`
 
 V2 keeps the original APIs stable where possible, V3 adds role workflow actions for trips, hospital capacity, and rerouting, and V4 adds outbox processing and health operations. The V4 publish response reports `published`, `failed`, and remaining `pending` events.
+
+## V4 Reliability Configuration
+
+Default publishing uses a local logging adapter:
+
+```yaml
+lifeline:
+  outbox:
+    publisher:
+      mode: logging
+```
+
+For local retry demos, start the backend with a failing publisher:
+
+```powershell
+cd backend
+mvn.cmd spring-boot:run "-Dspring-boot.run.profiles=memory" "-Dspring-boot.run.arguments=--lifeline.outbox.publisher.mode=fail-all --lifeline.outbox.publisher.failure-message=demo-adapter-down"
+```
+
+The publisher modes are:
+
+- `logging`: records a successful local publish in backend logs
+- `fail-all`: fails every publish attempt
+- `fail-event-type`: fails only events matching `lifeline.outbox.publisher.fail-event-type`
+
+The PostgreSQL outbox integration test is opt-in because it requires Docker:
+
+```powershell
+cd backend
+mvn.cmd test "-Dlifeline.integration.postgres=true" "-Dtest=JdbcOutboxIntegrationTest"
+```
 
 ## Prerequisites
 

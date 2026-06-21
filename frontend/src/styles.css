@@ -836,6 +836,12 @@ button {
   font-size: 12px;
 }
 
+.timeline-row .timeline-detail {
+  color: #991b1b;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 @media (max-width: 1240px) {
   .topbar {
     grid-template-columns: 1fr;

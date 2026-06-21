@@ -711,6 +711,7 @@ function ControlView({
           pending={data?.metrics.pendingOutboxEvents ?? 0}
           published={data?.metrics.publishedOutboxEvents ?? 0}
           summary={data?.outboxSummary ?? null}
+          events={data?.outboxEvents ?? []}
           lastPublish={lastOutboxPublish}
           onPublish={onPublishOutbox}
           busy={busy}
@@ -873,6 +874,7 @@ function OutboxPanel({
   pending,
   published,
   summary,
+  events,
   lastPublish,
   onPublish,
   busy
@@ -880,6 +882,7 @@ function OutboxPanel({
   pending: number;
   published: number;
   summary: OutboxSummary | null;
+  events: OutboxEvent[];
   lastPublish: OutboxPublishResponse | null;
   onPublish: () => void;
   busy: boolean;
@@ -890,6 +893,7 @@ function OutboxPanel({
   const readyEvents = summary?.readyEvents ?? pending;
   const failedEvents = summary?.failedEvents ?? 0;
   const retryScheduledEvents = summary?.retryScheduledEvents ?? 0;
+  const latestFailure = events.find((event) => !event.publishedAt && event.lastPublishError);
   const eventTypes = summary?.eventTypes ?? [];
 
   return (
@@ -910,6 +914,8 @@ function OutboxPanel({
         <InfoLine label="Retry Waiting" value={String(retryScheduledEvents)} />
         <InfoLine label="Oldest Pending" value={oldestPending} />
         <InfoLine label="Last Published" value={lastPublished} />
+        {latestFailure && <InfoLine label="Latest Failure" value={latestFailure.lastPublishError ?? 'None'} />}
+        {latestFailure && <InfoLine label="Next Retry" value={latestFailure.nextPublishAttemptAt ? formatDateTime(latestFailure.nextPublishAttemptAt) : 'Ready now'} />}
       </div>
       {eventTypes.length > 0 && (
         <div className="event-type-list">
@@ -939,12 +945,14 @@ function Timeline({ events, decisions }: { events: OutboxEvent[]; decisions: Dis
       id: event.id,
       type: event.eventType,
       subject: `${event.aggregateType} ${event.aggregateId} - ${outboxDeliveryState(event)}`,
+      detail: outboxDeliveryDetail(event),
       at: event.createdAt
     })),
     ...decisions.map((decision) => ({
       id: decision.id,
       type: 'dispatch.decision',
       subject: `${decision.ambulanceId} to ${decision.hospitalId}`,
+      detail: '',
       at: decision.createdAt
     }))
   ].sort((left, right) => new Date(right.at).getTime() - new Date(left.at).getTime()).slice(0, 8);
@@ -959,6 +967,7 @@ function Timeline({ events, decisions }: { events: OutboxEvent[]; decisions: Dis
           <div>
             <strong>{row.type}</strong>
             <small>{row.subject}</small>
+            {row.detail && <small className="timeline-detail">{row.detail}</small>}
           </div>
         </div>
       ))}
@@ -1110,6 +1119,17 @@ function outboxDeliveryState(event: OutboxEvent) {
   if (event.lastPublishError) return 'failed, retry scheduled';
   if (event.nextPublishAttemptAt && new Date(event.nextPublishAttemptAt).getTime() > Date.now()) return 'retry waiting';
   return 'pending';
+}
+
+function outboxDeliveryDetail(event: OutboxEvent) {
+  const parts = [`attempts ${event.publishAttempts}`];
+  if (event.lastPublishError) {
+    parts.push(event.lastPublishError);
+  }
+  if (!event.publishedAt && event.nextPublishAttemptAt) {
+    parts.push(`retry ${formatDateTime(event.nextPublishAttemptAt)}`);
+  }
+  return parts.join(' - ');
 }
 
 function formatDuration(seconds: number) {
