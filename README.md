@@ -191,6 +191,17 @@ This design avoids losing events when the database succeeds but the broker or do
 | Redis | `6379` | Live ambulance locations |
 | Kafka | `9092` | Outbox event stream |
 
+## Repository Layout
+
+```text
+backend/                 Operations service with authenticated workflow APIs
+frontend/                React role app for patient, driver, hospital, control, and simulation
+services/                Gateway plus bounded-context service shells
+deploy/k8s/              Kubernetes deployment baseline
+scripts/verify-v7.ps1    Local verification entry point
+docker-compose.yml       Full local distributed runtime
+```
+
 ## Local Development
 
 ### Prerequisites
@@ -308,6 +319,22 @@ V7 targets a production-ready local and container deployment shape:
 - Health endpoints for every service.
 - PostgreSQL, Redis, and Kafka as explicit infrastructure dependencies.
 
+### Kubernetes
+
+Kubernetes manifests live in `deploy/k8s/base`.
+
+```powershell
+kubectl apply -f deploy/k8s/base/namespace.yaml
+kubectl apply -f deploy/k8s/base/configmap.yaml
+kubectl apply -f deploy/k8s/base/secrets.example.yaml
+kubectl apply -f deploy/k8s/base/operations-service.yaml
+kubectl apply -f deploy/k8s/base/boundary-services.yaml
+kubectl apply -f deploy/k8s/base/gateway-service.yaml
+kubectl apply -f deploy/k8s/base/frontend.yaml
+```
+
+Replace `secrets.example.yaml` values or supply an equivalent `lifeline-secrets` object from your secret manager before deploying.
+
 Recommended production hardening beyond this repository:
 
 - Replace local JWT demo auth with managed OAuth/OIDC.
@@ -355,6 +382,16 @@ Frontend:
 cd frontend
 npm.cmd run build
 ```
+
+Full local verification:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File scripts\verify-v7.ps1 -SkipDockerConfig
+```
+
+Run without `-SkipDockerConfig` on a machine with Docker installed to include `docker compose config`.
+
+CI is defined in `.github/workflows/ci.yml` and runs backend tests, service reactor tests, and the frontend build.
 
 Opt-in PostgreSQL/Testcontainers outbox test:
 
