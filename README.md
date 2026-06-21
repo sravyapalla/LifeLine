@@ -12,6 +12,7 @@ The product direction is intentionally pragmatic: build a correct, explainable d
 | V2 | Implemented | Durable dispatch foundation with PostgreSQL/PostGIS schema, row-locked reservations, decision audit, outbox records, and candidate explanations |
 | V3 | Implemented | Multi-actor workflow with patient, driver, hospital, and control tower role surfaces plus rerouting actions |
 | V4 | Implemented in this branch | Event-driven reliability foundation with processable outbox events, health summaries, publish metrics, and control tower visibility |
+| V5 | Implemented in this branch | Ops Simulator with required Docker runtime, Kafka event streaming, Redis live locations, notifications, routing abstraction, and optimization comparisons |
 
 ## V1 Implemented Scope
 
@@ -62,6 +63,18 @@ The product direction is intentionally pragmatic: build a correct, explainable d
 - Opt-in PostgreSQL/Testcontainers integration test for JDBC outbox retry state
 - Control Tower outbox reliability panel with manual publish action
 - Timeline visibility for pending versus published event state
+
+## V5 Implemented Scope
+
+- Required Docker runtime for PostgreSQL/PostGIS, Redis, and Kafka
+- Routing provider boundary with deterministic straight-line ETA provider
+- Redis-backed live ambulance location projection used by dispatch and maps
+- Kafka outbox publisher mode using the V4 retry/failure lifecycle
+- Role-targeted notification center generated from workflow events
+- Simulation run APIs and durable simulation history
+- Greedy sequential versus global min-cost optimization comparison
+- New `/simulation` route for scenario design, comparison, and playback
+- Expanded operational metrics for simulations, live locations, notifications, and Kafka failures
 
 ## V2 Product Goal
 
@@ -272,6 +285,66 @@ frontend/
 9. Control Tower refreshes pending, published, failed, ready, and retry-waiting health state
 ```
 
+## V5 Product Goal
+
+V5 turns LifeLine from a workflow demo into an operations simulator.
+
+The V5 goal is to let operators stress the system before a real emergency wave happens:
+
+1. Run the full local stack with PostgreSQL/PostGIS, Redis, and Kafka.
+2. Move ambulances through live Redis location updates.
+3. Compare greedy dispatch with a bounded global optimizer.
+4. Simulate hospital exhaustion, ambulance outages, and incident surges.
+5. Publish workflow events through Kafka while preserving V4 outbox retry guarantees.
+6. Notify patient, driver, hospital, and control roles from published workflow events.
+7. Keep routing swappable behind an internal provider before adding OSRM.
+
+## V5 Target Architecture
+
+```text
+frontend/
+  role routes
+    /patient
+    /driver
+    /hospital
+    /control
+    /simulation
+
+backend/
+  routing
+    RoutingProvider
+    StraightLineRoutingProvider
+
+  live-location
+    Redis-backed ambulance location projection
+    memory profile fallback
+
+  outbox
+    Kafka publisher mode
+    V4 retry state remains authoritative
+
+  notifications
+    role-targeted notification inbox
+    generated from published outbox events
+
+  simulation
+    scenario generator
+    greedy sequential strategy
+    global min-cost strategy
+    persisted run history
+
+data/
+  PostgreSQL/PostGIS
+    operational source of truth
+    simulation run history
+
+  Redis
+    live ambulance location snapshots
+
+  Kafka
+    outbox event stream
+```
+
 ## Design Decisions
 
 | ID | Decision | Why |
@@ -302,6 +375,10 @@ frontend/
 | D24 | Expose outbox health through product UI, not logs only | Operators should see backlog age, last publish time, and event-type pressure directly inside the Control Tower. |
 | D25 | Record outbox retry state before adding external delivery adapters | Attempts, last failure reason, and next retry time make failures debuggable before Kafka, notifications, or webhooks are introduced. |
 | D26 | Keep external delivery adapters out of V4 runtime | V4 should prove claim, retry, and observability contracts first. Notification, Redis, and broker adapters can build on this in V5+ without changing the outbox core. |
+| D27 | Make V5 a required Docker runtime release | Redis and Kafka behavior should be exercised as real infrastructure in V5, while memory profile remains a lightweight fallback. |
+| D28 | Add routing as a provider boundary before OSRM | The dispatch engine should depend on route estimates, not a specific routing vendor. |
+| D29 | Keep simulation deterministic with explicit random seeds | Operators and reviewers should be able to replay the same incident surge and compare strategies repeatably. |
+| D30 | Compare greedy and global optimization side by side | V5 should teach why optimization matters without replacing the explainable greedy workflow prematurely. |
 
 ## V2 Data Ownership
 
@@ -352,8 +429,15 @@ Current APIs:
 - `POST /api/trips/{tripId}/status`
 - `POST /api/hospitals/{hospitalId}/capacity`
 - `POST /api/trips/{tripId}/reroute`
+- `POST /api/ambulances/{id}/location`
+- `GET /api/ambulance-locations`
+- `GET /api/notifications?role={role}`
+- `POST /api/notifications/{id}/ack`
+- `POST /api/simulations`
+- `GET /api/simulations`
+- `GET /api/simulations/{id}`
 
-V2 keeps the original APIs stable where possible, V3 adds role workflow actions for trips, hospital capacity, and rerouting, and V4 adds outbox processing and health operations. The V4 publish response reports `published`, `failed`, and remaining `pending` events.
+V2 keeps the original APIs stable where possible, V3 adds role workflow actions for trips, hospital capacity, and rerouting, V4 adds outbox processing and health operations, and V5 adds live location, notifications, and simulation APIs. The V4/V5 publish response reports `published`, `failed`, and remaining `pending` events.
 
 ## V4 Reliability Configuration
 
@@ -392,13 +476,14 @@ mvn.cmd test "-Dlifeline.integration.postgres=true" "-Dtest=JdbcOutboxIntegratio
 - Maven 3.9+
 - Node.js 20+
 - npm 10+
+- Docker Desktop or a compatible Docker runtime for the full V5 stack
 
 ## Run Backend
 
-Start PostgreSQL first:
+Start the V5 runtime first:
 
 ```powershell
-docker compose up -d postgres
+docker compose up -d postgres redis kafka
 ```
 
 Then run the backend:
