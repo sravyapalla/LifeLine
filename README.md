@@ -10,7 +10,8 @@ The product direction is intentionally pragmatic: build a correct, explainable d
 | --- | --- | --- |
 | V1 | Implemented | End-to-end dispatch prototype with seeded Bengaluru data, in-memory state, REST APIs, and React dashboard |
 | V2 | Implemented | Durable dispatch foundation with PostgreSQL/PostGIS schema, row-locked reservations, decision audit, outbox records, and candidate explanations |
-| V3 | Implemented in this branch | Multi-actor workflow with patient, driver, hospital, and control tower role surfaces plus rerouting actions |
+| V3 | Implemented | Multi-actor workflow with patient, driver, hospital, and control tower role surfaces plus rerouting actions |
+| V4 | Implemented in this branch | Event-driven reliability foundation with processable outbox events, health summaries, publish metrics, and control tower visibility |
 
 ## V1 Implemented Scope
 
@@ -45,6 +46,22 @@ The product direction is intentionally pragmatic: build a correct, explainable d
 - Reroute scoring that excludes the current hospital and exhausted hospitals while reusing the dispatch engine's explainable ranking model
 - Outbox events for trip status changes, hospital capacity changes, and reroutes
 - Frontend timeline combining outbox events and dispatch audit records
+
+## V4 Implemented Scope
+
+- Store-level pending outbox query and publish operations
+- PostgreSQL publish batching using row locks and `SKIP LOCKED`
+- Memory profile parity for local outbox publish demos
+- Manual backend endpoint to publish pending outbox events
+- Optional scheduled outbox publishing behind configuration
+- Metrics for pending and published outbox events
+- Event health summary with backlog age and event-type counts
+- Retry state with publish attempts, last failure reason, and next retry time
+- Configurable publisher abstraction to separate event delivery from outbox state management
+- Failure-demo publisher mode for exercising retry behavior locally
+- Opt-in PostgreSQL/Testcontainers integration test for JDBC outbox retry state
+- Control Tower outbox reliability panel with manual publish action
+- Timeline visibility for pending versus published event state
 
 ## V2 Product Goal
 
@@ -183,6 +200,78 @@ data/
 7. Backend scores alternate hospitals, reserves the new hospital, updates the trip, and writes an outbox event
 ```
 
+## V4 Product Goal
+
+V4 begins turning the outbox from an audit table into a reliability mechanism.
+
+The V4 goal is not to add Kafka yet. The goal is to prove the event lifecycle inside the modular monolith:
+
+1. Workflow actions write durable outbox events in the same transaction as state changes.
+2. Operators can see which events are still pending.
+3. A processor can claim and publish a bounded batch safely.
+4. Published events are marked with `published_at`.
+5. The Control Tower exposes event health as an operational signal.
+6. Event health includes backlog age and event-type distribution, not just raw event rows.
+7. Failed delivery attempts are retained with retry state instead of being hidden in logs.
+
+## V4 Target Architecture
+
+```text
+backend/
+  outbox
+    OutboxProcessor
+      manual publish endpoint
+      optional scheduled polling
+      bounded batch size
+      retry delay
+
+    OutboxSummaryService
+      pending and published counts
+      ready, failed, and retry-scheduled counts
+      oldest pending backlog age
+      event-type breakdown
+
+    OutboxPublisher
+      configurable logging/failure demo publisher
+      future notification or broker adapter boundary
+
+  store
+    pending event query
+    claim ready events
+    mark publish success or failure
+    PostgreSQL row locking with SKIP LOCKED
+
+data/
+  outbox_events
+    payload
+    created_at
+    published_at
+    publish_attempts
+    last_publish_error
+    next_publish_attempt_at
+
+frontend/
+  control tower
+    pending/published metrics
+    manual publish action
+    backlog health summary
+    event timeline state
+```
+
+## V4 Outbox Flow
+
+```text
+1. Patient, dispatch, driver, hospital, or reroute action changes backend state
+2. Backend writes the matching outbox event in the same transaction
+3. Event remains pending while published_at is null
+4. Manual publish endpoint or optional scheduled processor claims a batch
+5. Processor sends each claimed event through the publisher adapter
+6. Successful events are marked with `published_at`
+7. Failed events retain `last_publish_error` and wait until `next_publish_attempt_at`
+8. Summary endpoint reports backlog age, last publish time, retry state, and event-type distribution
+9. Control Tower refreshes pending, published, failed, ready, and retry-waiting health state
+```
+
 ## Design Decisions
 
 | ID | Decision | Why |
@@ -207,6 +296,12 @@ data/
 | D18 | Reroute active trips through the dispatch engine | Alternate hospital selection must stay explainable and testable rather than becoming a special-case UI shortcut. |
 | D19 | Treat hospital capacity updates as authoritative | Hospital UI is the source for live receiving availability; reroute logic must react to exhausted capacity. |
 | D20 | Keep eventing local through the outbox in V3 | The product should prove event contracts and timeline behavior before introducing Kafka or another broker. |
+| D21 | Process the transactional outbox before adding Kafka | Reliable local event lifecycle should be proven before adding broker operations and deployment complexity. |
+| D22 | Keep automatic outbox publishing disabled by default | Local demos should be deterministic; teams can enable scheduled publishing with configuration when they are ready. |
+| D23 | Use `SKIP LOCKED` for PostgreSQL outbox batches | Future workers should be able to claim pending events concurrently without double-publishing the same row. |
+| D24 | Expose outbox health through product UI, not logs only | Operators should see backlog age, last publish time, and event-type pressure directly inside the Control Tower. |
+| D25 | Record outbox retry state before adding external delivery adapters | Attempts, last failure reason, and next retry time make failures debuggable before Kafka, notifications, or webhooks are introduced. |
+| D26 | Keep external delivery adapters out of V4 runtime | V4 should prove claim, retry, and observability contracts first. Notification, Redis, and broker adapters can build on this in V5+ without changing the outbox core. |
 
 ## V2 Data Ownership
 
@@ -239,7 +334,7 @@ The reservation operation should be idempotent using a request key or incident-l
 
 ## API Surface
 
-Current V1 APIs:
+Current APIs:
 
 - `GET /api/ambulances`
 - `GET /api/hospitals`
@@ -249,13 +344,47 @@ Current V1 APIs:
 - `GET /api/trips`
 - `GET /api/dispatch-decisions`
 - `GET /api/outbox-events`
+- `GET /api/outbox-events/pending`
+- `GET /api/outbox-events/summary`
+- `POST /api/outbox-events/publish`
 - `GET /api/metrics`
 - `POST /api/demo/reset`
 - `POST /api/trips/{tripId}/status`
 - `POST /api/hospitals/{hospitalId}/capacity`
 - `POST /api/trips/{tripId}/reroute`
 
-V2 keeps the original APIs stable where possible, while V3 adds role workflow actions for trips, hospital capacity, and rerouting.
+V2 keeps the original APIs stable where possible, V3 adds role workflow actions for trips, hospital capacity, and rerouting, and V4 adds outbox processing and health operations. The V4 publish response reports `published`, `failed`, and remaining `pending` events.
+
+## V4 Reliability Configuration
+
+Default publishing uses a local logging adapter:
+
+```yaml
+lifeline:
+  outbox:
+    publisher:
+      mode: logging
+```
+
+For local retry demos, start the backend with a failing publisher:
+
+```powershell
+cd backend
+mvn.cmd spring-boot:run "-Dspring-boot.run.profiles=memory" "-Dspring-boot.run.arguments=--lifeline.outbox.publisher.mode=fail-all --lifeline.outbox.publisher.failure-message=demo-adapter-down"
+```
+
+The publisher modes are:
+
+- `logging`: records a successful local publish in backend logs
+- `fail-all`: fails every publish attempt
+- `fail-event-type`: fails only events matching `lifeline.outbox.publisher.fail-event-type`
+
+The PostgreSQL outbox integration test is opt-in because it requires Docker:
+
+```powershell
+cd backend
+mvn.cmd test "-Dlifeline.integration.postgres=true" "-Dtest=JdbcOutboxIntegrationTest"
+```
 
 ## Prerequisites
 
@@ -291,7 +420,7 @@ To run the fallback in-memory profile instead of PostgreSQL:
 
 ```powershell
 cd backend
-mvn spring-boot:run -Dspring-boot.run.profiles=memory
+mvn.cmd spring-boot:run "-Dspring-boot.run.profiles=memory"
 ```
 
 ## Run Frontend

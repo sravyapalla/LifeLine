@@ -22,6 +22,7 @@ import {
   createIncident,
   dispatchIncident,
   getDashboardData,
+  publishOutboxEvents,
   rerouteTrip,
   resetDemo,
   updateHospitalCapacity,
@@ -38,6 +39,8 @@ import type {
   IncidentPriority,
   Metrics,
   OutboxEvent,
+  OutboxPublishResponse,
+  OutboxSummary,
   Trip,
   TripStatus
 } from './types';
@@ -51,6 +54,7 @@ interface DashboardState {
   trips: Trip[];
   dispatchDecisions: DispatchAuditRecord[];
   outboxEvents: OutboxEvent[];
+  outboxSummary: OutboxSummary;
   metrics: Metrics;
 }
 
@@ -83,6 +87,7 @@ export default function App() {
   const [form, setForm] = useState<CreateIncidentPayload>(initialIncident);
   const [capacityDrafts, setCapacityDrafts] = useState<Record<string, number>>({});
   const [lastDecision, setLastDecision] = useState<DispatchResponse | null>(null);
+  const [lastOutboxPublish, setLastOutboxPublish] = useState<OutboxPublishResponse | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -208,12 +213,27 @@ export default function App() {
     }
   }
 
+  async function handlePublishOutbox() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await publishOutboxEvents();
+      setLastOutboxPublish(result);
+      await load();
+    } catch (publishError) {
+      setError((publishError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleReset() {
     setBusy(true);
     setError('');
     try {
       await resetDemo();
       setLastDecision(null);
+      setLastOutboxPublish(null);
       setSelectedIncidentId('');
       setSelectedTripId('');
       await load();
@@ -231,7 +251,7 @@ export default function App() {
     <main className="shell">
       <header className="topbar">
         <div className="brand-block">
-          <p className="eyebrow">LifeLine V3</p>
+          <p className="eyebrow">LifeLine V4</p>
           <h1>Multi-Actor Emergency Workflow</h1>
         </div>
 
@@ -267,6 +287,7 @@ export default function App() {
         <MetricCard icon={<AmbulanceIcon size={18} />} label="Available" value={metrics?.availableAmbulances ?? 0} tone="green" />
         <MetricCard icon={<Route size={18} />} label="Active Trips" value={activeTrips.length} tone="blue" />
         <MetricCard icon={<Bed size={18} />} label="Bed Avg" value={`${metrics?.averageBedAvailabilityPercent ?? 0}%`} tone="amber" />
+        <MetricCard icon={<ClipboardList size={18} />} label="Pending Events" value={metrics?.pendingOutboxEvents ?? 0} tone="violet" />
       </section>
 
       {role === 'patient' && (
@@ -313,7 +334,9 @@ export default function App() {
           setSelectedTripId={setSelectedTripId}
           onDispatch={handleDispatch}
           onReroute={handleReroute}
+          onPublishOutbox={handlePublishOutbox}
           lastDecision={lastDecision}
+          lastOutboxPublish={lastOutboxPublish}
           busy={busy}
         />
       )}
@@ -572,7 +595,9 @@ function ControlView({
   setSelectedTripId,
   onDispatch,
   onReroute,
+  onPublishOutbox,
   lastDecision,
+  lastOutboxPublish,
   busy
 }: {
   data: DashboardState | null;
@@ -584,7 +609,9 @@ function ControlView({
   setSelectedTripId: (id: string) => void;
   onDispatch: (incidentId?: string) => void;
   onReroute: (tripId: string) => void;
+  onPublishOutbox: () => void;
   lastDecision: DispatchResponse | null;
+  lastOutboxPublish: OutboxPublishResponse | null;
   busy: boolean;
 }) {
   return (
@@ -679,6 +706,16 @@ function ControlView({
         )}
 
         {lastDecision && <DecisionResult decision={lastDecision} />}
+
+        <OutboxPanel
+          pending={data?.metrics.pendingOutboxEvents ?? 0}
+          published={data?.metrics.publishedOutboxEvents ?? 0}
+          summary={data?.outboxSummary ?? null}
+          events={data?.outboxEvents ?? []}
+          lastPublish={lastOutboxPublish}
+          onPublish={onPublishOutbox}
+          busy={busy}
+        />
 
         <Timeline events={data?.outboxEvents ?? []} decisions={data?.dispatchDecisions ?? []} />
       </aside>
@@ -833,18 +870,89 @@ function DecisionResult({ decision }: { decision: DispatchResponse }) {
   );
 }
 
+function OutboxPanel({
+  pending,
+  published,
+  summary,
+  events,
+  lastPublish,
+  onPublish,
+  busy
+}: {
+  pending: number;
+  published: number;
+  summary: OutboxSummary | null;
+  events: OutboxEvent[];
+  lastPublish: OutboxPublishResponse | null;
+  onPublish: () => void;
+  busy: boolean;
+}) {
+  const totalEvents = summary?.totalEvents ?? pending + published;
+  const oldestPending = summary?.oldestPendingAgeSeconds ? formatDuration(summary.oldestPendingAgeSeconds) : 'None';
+  const lastPublished = summary?.lastPublishedAt ? formatDateTime(summary.lastPublishedAt) : 'None';
+  const readyEvents = summary?.readyEvents ?? pending;
+  const failedEvents = summary?.failedEvents ?? 0;
+  const retryScheduledEvents = summary?.retryScheduledEvents ?? 0;
+  const latestFailure = events.find((event) => !event.publishedAt && event.lastPublishError);
+  const eventTypes = summary?.eventTypes ?? [];
+
+  return (
+    <div className="outbox-panel">
+      <div className="panel-heading compact-heading">
+        <div>
+          <p className="eyebrow">Reliability</p>
+          <h3>Outbox</h3>
+        </div>
+        <ClipboardList size={18} />
+      </div>
+      <div className="outbox-stats">
+        <InfoLine label="Total" value={String(totalEvents)} />
+        <InfoLine label="Pending" value={String(pending)} />
+        <InfoLine label="Published" value={String(published)} />
+        <InfoLine label="Ready" value={String(readyEvents)} />
+        <InfoLine label="Failed" value={String(failedEvents)} />
+        <InfoLine label="Retry Waiting" value={String(retryScheduledEvents)} />
+        <InfoLine label="Oldest Pending" value={oldestPending} />
+        <InfoLine label="Last Published" value={lastPublished} />
+        {latestFailure && <InfoLine label="Latest Failure" value={latestFailure.lastPublishError ?? 'None'} />}
+        {latestFailure && <InfoLine label="Next Retry" value={latestFailure.nextPublishAttemptAt ? formatDateTime(latestFailure.nextPublishAttemptAt) : 'Ready now'} />}
+      </div>
+      {eventTypes.length > 0 && (
+        <div className="event-type-list">
+          {eventTypes.slice(0, 5).map((eventType) => (
+            <div className="event-type-row" key={eventType.eventType}>
+              <span>{eventType.eventType}</span>
+              <em>{eventType.pending} pending / {eventType.failed} failed / {eventType.published} published</em>
+            </div>
+          ))}
+        </div>
+      )}
+      <button className="ghost-button full-width" type="button" onClick={onPublish} disabled={busy || readyEvents === 0}>
+        Publish Pending
+      </button>
+      {lastPublish && (
+        <small className="publish-note">
+          Published {lastPublish.published}; failed {lastPublish.failed}; {lastPublish.pending} pending
+        </small>
+      )}
+    </div>
+  );
+}
+
 function Timeline({ events, decisions }: { events: OutboxEvent[]; decisions: DispatchAuditRecord[] }) {
   const rows = [
     ...events.map((event) => ({
       id: event.id,
       type: event.eventType,
-      subject: `${event.aggregateType} ${event.aggregateId}`,
+      subject: `${event.aggregateType} ${event.aggregateId} - ${outboxDeliveryState(event)}`,
+      detail: outboxDeliveryDetail(event),
       at: event.createdAt
     })),
     ...decisions.map((decision) => ({
       id: decision.id,
       type: 'dispatch.decision',
       subject: `${decision.ambulanceId} to ${decision.hospitalId}`,
+      detail: '',
       at: decision.createdAt
     }))
   ].sort((left, right) => new Date(right.at).getTime() - new Date(left.at).getTime()).slice(0, 8);
@@ -859,6 +967,7 @@ function Timeline({ events, decisions }: { events: OutboxEvent[]; decisions: Dis
           <div>
             <strong>{row.type}</strong>
             <small>{row.subject}</small>
+            {row.detail && <small className="timeline-detail">{row.detail}</small>}
           </div>
         </div>
       ))}
@@ -1003,4 +1112,33 @@ function rolePath(role: Role) {
 
 function formatStatus(value: string) {
   return value.toLowerCase().split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function outboxDeliveryState(event: OutboxEvent) {
+  if (event.publishedAt) return 'published';
+  if (event.lastPublishError) return 'failed, retry scheduled';
+  if (event.nextPublishAttemptAt && new Date(event.nextPublishAttemptAt).getTime() > Date.now()) return 'retry waiting';
+  return 'pending';
+}
+
+function outboxDeliveryDetail(event: OutboxEvent) {
+  const parts = [`attempts ${event.publishAttempts}`];
+  if (event.lastPublishError) {
+    parts.push(event.lastPublishError);
+  }
+  if (!event.publishedAt && event.nextPublishAttemptAt) {
+    parts.push(`retry ${formatDateTime(event.nextPublishAttemptAt)}`);
+  }
+  return parts.join(' - ');
+}
+
+function formatDuration(seconds: number) {
+  const safeSeconds = Math.max(0, seconds);
+  if (safeSeconds < 60) return `${safeSeconds}s`;
+  if (safeSeconds < 3600) return `${Math.floor(safeSeconds / 60)}m`;
+  return `${Math.floor(safeSeconds / 3600)}h ${Math.floor((safeSeconds % 3600) / 60)}m`;
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString();
 }

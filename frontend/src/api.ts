@@ -7,6 +7,8 @@ import type {
   Incident,
   Metrics,
   OutboxEvent,
+  OutboxPublishResponse,
+  OutboxSummary,
   Trip,
   TripStatus
 } from './types';
@@ -36,17 +38,18 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function getDashboardData() {
-  const [ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, metrics] = await Promise.all([
+  const [ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics] = await Promise.all([
     request<Ambulance[]>('/ambulances'),
     request<Hospital[]>('/hospitals'),
     request<Incident[]>('/incidents'),
     request<Trip[]>('/trips'),
     request<DispatchAuditRecord[]>('/dispatch-decisions'),
     request<OutboxEvent[]>('/outbox-events'),
+    request<OutboxSummary>('/outbox-events/summary'),
     request<Metrics>('/metrics')
   ]);
 
-  return { ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, metrics };
+  return { ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics };
 }
 
 export function createIncident(payload: CreateIncidentPayload) {
@@ -85,6 +88,12 @@ export function updateHospitalCapacity(hospitalId: string, availableBeds: number
 
 export function rerouteTrip(tripId: string) {
   return request<DispatchResponse>(`/trips/${tripId}/reroute`, {
+    method: 'POST'
+  });
+}
+
+export function publishOutboxEvents() {
+  return request<OutboxPublishResponse>('/outbox-events/publish', {
     method: 'POST'
   });
 }

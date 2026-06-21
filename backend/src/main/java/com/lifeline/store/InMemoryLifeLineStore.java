@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -95,6 +96,36 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     @Override
     public synchronized List<OutboxEvent> outboxEvents() {
         return new ArrayList<>(outboxEvents);
+    }
+
+    @Override
+    public synchronized List<OutboxEvent> pendingOutboxEvents(int limit) {
+        return outboxEvents.stream()
+                .filter(event -> event.publishedAt() == null)
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public synchronized List<OutboxEvent> claimReadyOutboxEvents(int limit, Instant claimedAt, Instant nextAttemptAt) {
+        List<OutboxEvent> claimed = outboxEvents.stream()
+                .filter(event -> event.isReadyForPublish(claimedAt))
+                .sorted(Comparator.comparing(OutboxEvent::createdAt))
+                .limit(limit)
+                .map(event -> event.claimedAt(claimedAt, nextAttemptAt))
+                .toList();
+
+        for (OutboxEvent event : claimed) {
+            replaceOutboxEvent(event);
+        }
+        return claimed;
+    }
+
+    @Override
+    public synchronized int pendingOutboxEventCount() {
+        return (int) outboxEvents.stream()
+                .filter(event -> event.publishedAt() == null)
+                .count();
     }
 
     @Override
@@ -291,6 +322,36 @@ public class InMemoryLifeLineStore implements LifeLineStore {
         return updatedTrip;
     }
 
+    @Override
+    public synchronized int publishPendingOutboxEvents(int limit) {
+        int published = 0;
+        Instant now = Instant.now();
+        List<OutboxEvent> claimed = claimReadyOutboxEvents(limit, now, now);
+        for (OutboxEvent event : claimed) {
+            markOutboxEventPublished(event.id(), now);
+            published += 1;
+        }
+        return published;
+    }
+
+    @Override
+    public synchronized void markOutboxEventPublished(String eventId, Instant publishedAt) {
+        outboxEvents.stream()
+                .filter(event -> event.id().equals(eventId) && event.publishedAt() == null)
+                .findFirst()
+                .map(event -> event.publishedAt(publishedAt))
+                .ifPresent(this::replaceOutboxEvent);
+    }
+
+    @Override
+    public synchronized void markOutboxEventFailed(String eventId, String failureReason) {
+        outboxEvents.stream()
+                .filter(event -> event.id().equals(eventId) && event.publishedAt() == null)
+                .findFirst()
+                .map(event -> event.failedWith(failureReason))
+                .ifPresent(this::replaceOutboxEvent);
+    }
+
     private void addAmbulance(Ambulance ambulance) {
         ambulances.put(ambulance.id(), ambulance);
     }
@@ -314,7 +375,20 @@ public class InMemoryLifeLineStore implements LifeLineStore {
                 eventType,
                 payload,
                 now,
+                null,
+                0,
+                null,
+                null,
                 null
         ));
+    }
+
+    private void replaceOutboxEvent(OutboxEvent updated) {
+        for (int index = 0; index < outboxEvents.size(); index += 1) {
+            if (outboxEvents.get(index).id().equals(updated.id())) {
+                outboxEvents.set(index, updated);
+                return;
+            }
+        }
     }
 }

@@ -12,6 +12,10 @@ import com.lifeline.domain.IncidentStatus;
 import com.lifeline.domain.Location;
 import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
+import com.lifeline.outbox.OutboxProcessor;
+import com.lifeline.outbox.OutboxPublishResult;
+import com.lifeline.outbox.OutboxSummary;
+import com.lifeline.outbox.OutboxSummaryService;
 import com.lifeline.store.LifeLineStore;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -26,6 +30,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.List;
 
 @RestController
@@ -34,10 +39,19 @@ import java.util.List;
 public class LifeLineController {
     private final LifeLineStore store;
     private final DispatchEngine dispatchEngine;
+    private final OutboxProcessor outboxProcessor;
+    private final OutboxSummaryService outboxSummaryService;
 
-    public LifeLineController(LifeLineStore store, DispatchEngine dispatchEngine) {
+    public LifeLineController(
+            LifeLineStore store,
+            DispatchEngine dispatchEngine,
+            OutboxProcessor outboxProcessor,
+            OutboxSummaryService outboxSummaryService
+    ) {
         this.store = store;
         this.dispatchEngine = dispatchEngine;
+        this.outboxProcessor = outboxProcessor;
+        this.outboxSummaryService = outboxSummaryService;
     }
 
     @GetMapping("/ambulances")
@@ -70,6 +84,16 @@ public class LifeLineController {
         return store.outboxEvents();
     }
 
+    @GetMapping("/outbox-events/pending")
+    public List<OutboxEvent> pendingOutboxEvents() {
+        return store.pendingOutboxEvents(50);
+    }
+
+    @GetMapping("/outbox-events/summary")
+    public OutboxSummary outboxSummary() {
+        return outboxSummaryService.summarize(store.outboxEvents(), Instant.now());
+    }
+
     @GetMapping("/metrics")
     public MetricsResponse metrics() {
         List<Incident> incidents = store.incidents();
@@ -81,14 +105,23 @@ public class LifeLineController {
                 .mapToDouble(hospital -> hospital.totalBeds() == 0 ? 0 : (double) hospital.availableBeds() / hospital.totalBeds())
                 .average()
                 .orElse(0);
+        List<OutboxEvent> outboxEvents = store.outboxEvents();
 
         return new MetricsResponse(
                 (int) incidents.stream().filter(incident -> incident.status() == IncidentStatus.NEW).count(),
                 (int) ambulances.stream().filter(ambulance -> ambulance.status() == AmbulanceStatus.AVAILABLE).count(),
                 trips.size(),
                 (int) hospitals.stream().filter(Hospital::hasCapacity).count(),
-                Math.round(averageBedAvailability * 1000.0) / 10.0
+                Math.round(averageBedAvailability * 1000.0) / 10.0,
+                (int) outboxEvents.stream().filter(event -> event.publishedAt() == null).count(),
+                (int) outboxEvents.stream().filter(event -> event.publishedAt() != null).count(),
+                (int) outboxEvents.stream().filter(event -> event.publishedAt() == null && event.lastPublishError() != null).count()
         );
+    }
+
+    @PostMapping("/outbox-events/publish")
+    public OutboxPublishResult publishOutboxEvents() {
+        return outboxProcessor.publishPendingNow();
     }
 
     @PostMapping("/incidents")

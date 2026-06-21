@@ -79,6 +79,9 @@ export interface Metrics {
   activeTrips: number;
   hospitalsWithCapacity: number;
   averageBedAvailabilityPercent: number;
+  pendingOutboxEvents: number;
+  publishedOutboxEvents: number;
+  failedOutboxEvents: number;
 }
 
 export interface DispatchAuditRecord {
@@ -104,6 +107,38 @@ export interface OutboxEvent {
   payload: string;
   createdAt: string;
   publishedAt: string | null;
+  publishAttempts: number;
+  lastPublishAttemptAt: string | null;
+  lastPublishError: string | null;
+  nextPublishAttemptAt: string | null;
+}
+
+export interface OutboxEventTypeSummary {
+  eventType: string;
+  total: number;
+  pending: number;
+  failed: number;
+  published: number;
+}
+
+export interface OutboxSummary {
+  totalEvents: number;
+  pendingEvents: number;
+  publishedEvents: number;
+  readyEvents: number;
+  failedEvents: number;
+  retryScheduledEvents: number;
+  oldestPendingAgeSeconds: number;
+  oldestPendingAt: string | null;
+  lastPublishedAt: string | null;
+  eventTypes: OutboxEventTypeSummary[];
+}
+
+export interface OutboxPublishResponse {
+  published: number;
+  failed: number;
+  pending: number;
+  processedAt: string;
 }
 
 export interface CreateIncidentPayload {

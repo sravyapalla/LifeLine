@@ -12,6 +12,7 @@ import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,6 +28,12 @@ public interface LifeLineStore {
     List<DispatchAuditRecord> dispatchDecisions();
 
     List<OutboxEvent> outboxEvents();
+
+    List<OutboxEvent> pendingOutboxEvents(int limit);
+
+    List<OutboxEvent> claimReadyOutboxEvents(int limit, Instant claimedAt, Instant nextAttemptAt);
+
+    int pendingOutboxEventCount();
 
     Optional<Incident> findIncident(String id);
 
@@ -62,6 +69,12 @@ public interface LifeLineStore {
             CandidateScore winningScore,
             List<CandidateScore> alternatives
     );
+
+    int publishPendingOutboxEvents(int limit);
+
+    void markOutboxEventPublished(String eventId, Instant publishedAt);
+
+    void markOutboxEventFailed(String eventId, String failureReason);
 
     void reset();
 }

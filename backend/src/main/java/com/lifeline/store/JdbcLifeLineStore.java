@@ -99,10 +99,64 @@ public class JdbcLifeLineStore implements LifeLineStore {
     @Override
     public List<OutboxEvent> outboxEvents() {
         return jdbc.query("""
-                SELECT id, aggregate_type, aggregate_id, event_type, payload, created_at, published_at
+                SELECT id, aggregate_type, aggregate_id, event_type, payload, created_at, published_at,
+                       publish_attempts, last_publish_attempt_at, last_publish_error, next_publish_attempt_at
                 FROM outbox_events
                 ORDER BY created_at DESC
                 """, outboxEventMapper());
+    }
+
+    @Override
+    public List<OutboxEvent> pendingOutboxEvents(int limit) {
+        return jdbc.query("""
+                SELECT id, aggregate_type, aggregate_id, event_type, payload, created_at, published_at,
+                       publish_attempts, last_publish_attempt_at, last_publish_error, next_publish_attempt_at
+                FROM outbox_events
+                WHERE published_at IS NULL
+                ORDER BY created_at
+                LIMIT ?
+                """, outboxEventMapper(), limit);
+    }
+
+    @Override
+    @Transactional
+    public List<OutboxEvent> claimReadyOutboxEvents(int limit, Instant claimedAt, Instant nextAttemptAt) {
+        return jdbc.query("""
+                WITH ready_events AS (
+                    SELECT id
+                    FROM outbox_events
+                    WHERE published_at IS NULL
+                      AND (next_publish_attempt_at IS NULL OR next_publish_attempt_at <= ?)
+                    ORDER BY created_at
+                    LIMIT ?
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE outbox_events event
+                SET publish_attempts = event.publish_attempts + 1,
+                    last_publish_attempt_at = ?,
+                    next_publish_attempt_at = ?
+                FROM ready_events
+                WHERE event.id = ready_events.id
+                RETURNING event.id, event.aggregate_type, event.aggregate_id, event.event_type, event.payload,
+                          event.created_at, event.published_at, event.publish_attempts,
+                          event.last_publish_attempt_at, event.last_publish_error, event.next_publish_attempt_at
+                """,
+                outboxEventMapper(),
+                Timestamp.from(claimedAt),
+                limit,
+                Timestamp.from(claimedAt),
+                Timestamp.from(nextAttemptAt)
+        );
+    }
+
+    @Override
+    public int pendingOutboxEventCount() {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM outbox_events
+                WHERE published_at IS NULL
+                """, Integer.class);
+        return count == null ? 0 : count;
     }
 
     @Override
@@ -460,6 +514,39 @@ public class JdbcLifeLineStore implements LifeLineStore {
 
     @Override
     @Transactional
+    public int publishPendingOutboxEvents(int limit) {
+        Instant now = Instant.now();
+        List<OutboxEvent> claimed = claimReadyOutboxEvents(limit, now, now);
+        int published = 0;
+        for (OutboxEvent event : claimed) {
+            markOutboxEventPublished(event.id(), now);
+            published += 1;
+        }
+        return published;
+    }
+
+    @Override
+    public void markOutboxEventPublished(String eventId, Instant publishedAt) {
+        jdbc.update("""
+                UPDATE outbox_events
+                SET published_at = ?,
+                    last_publish_error = NULL,
+                    next_publish_attempt_at = NULL
+                WHERE id = ? AND published_at IS NULL
+                """, Timestamp.from(publishedAt), eventId);
+    }
+
+    @Override
+    public void markOutboxEventFailed(String eventId, String failureReason) {
+        jdbc.update("""
+                UPDATE outbox_events
+                SET last_publish_error = ?
+                WHERE id = ? AND published_at IS NULL
+                """, failureReason, eventId);
+    }
+
+    @Override
+    @Transactional
     public void reset() {
         jdbc.execute("""
                 TRUNCATE TABLE dispatch_candidate_scores, dispatch_decisions, outbox_events,
@@ -720,7 +807,11 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 rs.getString("event_type"),
                 rs.getString("payload"),
                 instant(rs, "created_at"),
-                instant(rs, "published_at")
+                instant(rs, "published_at"),
+                rs.getInt("publish_attempts"),
+                instant(rs, "last_publish_attempt_at"),
+                rs.getString("last_publish_error"),
+                instant(rs, "next_publish_attempt_at")
         );
     }
 
