@@ -3,6 +3,7 @@ export type AmbulanceType = 'BLS' | 'ALS' | 'ICU';
 export type EmergencyCondition = 'CARDIAC' | 'TRAUMA' | 'PEDIATRIC' | 'STROKE' | 'GENERAL';
 export type IncidentPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type IncidentStatus = 'NEW' | 'ASSIGNED' | 'CANCELLED' | 'COMPLETED';
+export type TripStatus = 'RESERVED' | 'EN_ROUTE_PATIENT' | 'EN_ROUTE_HOSPITAL' | 'COMPLETED' | 'CANCELLED';
 
 export interface Location {
   latitude: number;
@@ -48,7 +49,7 @@ export interface Trip {
   hospitalEtaMinutes: number;
   totalCost: number;
   createdAt: string;
-  status: string;
+  status: TripStatus;
 }
 
 export interface CandidateScore {
@@ -80,6 +81,31 @@ export interface Metrics {
   averageBedAvailabilityPercent: number;
 }
 
+export interface DispatchAuditRecord {
+  id: string;
+  incidentId: string;
+  ambulanceId: string;
+  hospitalId: string;
+  pickupEtaMinutes: number;
+  hospitalEtaMinutes: number;
+  hospitalLoad: number;
+  qualityPenalty: number;
+  typePenalty: number;
+  totalCost: number;
+  explanation: string;
+  createdAt: string;
+}
+
+export interface OutboxEvent {
+  id: string;
+  aggregateType: string;
+  aggregateId: string;
+  eventType: string;
+  payload: string;
+  createdAt: string;
+  publishedAt: string | null;
+}
+
 export interface CreateIncidentPayload {
   patientName: string;
   phone: string;
@@ -88,4 +114,3 @@ export interface CreateIncidentPayload {
   latitude: number;
   longitude: number;
 }
-

@@ -29,5 +29,8 @@ public record Hospital(
     public Hospital reserveOneBed() {
         return new Hospital(id, name, location, specialties, totalBeds, Math.max(availableBeds - 1, 0), qualityScore);
     }
-}
 
+    public Hospital withAvailableBeds(int nextAvailableBeds) {
+        return new Hospital(id, name, location, specialties, totalBeds, nextAvailableBeds, qualityScore);
+    }
+}

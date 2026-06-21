@@ -134,6 +134,16 @@ public class JdbcLifeLineStore implements LifeLineStore {
     }
 
     @Override
+    public Optional<Trip> findTrip(String id) {
+        return queryOptional("""
+                SELECT id, incident_id, ambulance_id, hospital_id, pickup_eta_minutes,
+                       hospital_eta_minutes, total_cost, created_at, status
+                FROM trips
+                WHERE id = ?
+                """, tripMapper(), id);
+    }
+
+    @Override
     @Transactional
     public Incident createIncident(
             String patientName,
@@ -285,6 +295,171 @@ public class JdbcLifeLineStore implements LifeLineStore {
 
     @Override
     @Transactional
+    public Trip updateTripStatus(String tripId, TripStatus status) {
+        Trip trip = lockTrip(tripId)
+                .orElseThrow(() -> new IllegalStateException("Trip not found."));
+
+        Instant now = Instant.now();
+        jdbc.update("""
+                UPDATE trips
+                SET status = ?
+                WHERE id = ?
+                """, status.name(), tripId);
+
+        AmbulanceStatus ambulanceStatus = switch (status) {
+            case RESERVED -> AmbulanceStatus.RESERVED;
+            case EN_ROUTE_PATIENT, EN_ROUTE_HOSPITAL -> AmbulanceStatus.ON_TRIP;
+            case COMPLETED, CANCELLED -> AmbulanceStatus.AVAILABLE;
+        };
+
+        jdbc.update("""
+                UPDATE ambulances
+                SET status = ?, updated_at = ?
+                WHERE id = ?
+                """, ambulanceStatus.name(), Timestamp.from(now), trip.ambulanceId());
+
+        if (status == TripStatus.COMPLETED) {
+            jdbc.update("""
+                    UPDATE incidents
+                    SET status = ?
+                    WHERE id = ?
+                    """, IncidentStatus.COMPLETED.name(), trip.incidentId());
+        } else if (status == TripStatus.CANCELLED) {
+            jdbc.update("""
+                    UPDATE incidents
+                    SET status = ?
+                    WHERE id = ?
+                    """, IncidentStatus.CANCELLED.name(), trip.incidentId());
+            jdbc.update("""
+                    UPDATE hospitals
+                    SET available_beds = LEAST(total_beds, available_beds + 1), updated_at = ?
+                    WHERE id = ?
+                    """, Timestamp.from(now), trip.hospitalId());
+        }
+
+        appendOutbox("Trip", tripId, "trip.status_changed", Map.of(
+                "tripId", tripId,
+                "status", status.name()
+        ), now);
+
+        return findTrip(tripId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public Hospital updateHospitalCapacity(String hospitalId, int availableBeds) {
+        Hospital hospital = lockHospital(hospitalId)
+                .orElseThrow(() -> new IllegalStateException("Hospital not found."));
+        if (availableBeds < 0 || availableBeds > hospital.totalBeds()) {
+            throw new IllegalStateException("Available beds must be between 0 and total beds.");
+        }
+
+        Instant now = Instant.now();
+        jdbc.update("""
+                UPDATE hospitals
+                SET available_beds = ?, updated_at = ?
+                WHERE id = ?
+                """, availableBeds, Timestamp.from(now), hospitalId);
+
+        appendOutbox("Hospital", hospitalId, "hospital.capacity_changed", Map.of(
+                "hospitalId", hospitalId,
+                "availableBeds", availableBeds
+        ), now);
+
+        return findHospital(hospitalId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public Trip rerouteTrip(
+            String tripId,
+            String hospitalId,
+            CandidateScore winningScore,
+            List<CandidateScore> alternatives
+    ) {
+        Trip trip = lockTrip(tripId)
+                .orElseThrow(() -> new IllegalStateException("Trip not found."));
+        Incident incident = lockIncident(trip.incidentId())
+                .orElseThrow(() -> new IllegalStateException("Incident not found."));
+        Ambulance ambulance = lockAmbulance(trip.ambulanceId())
+                .orElseThrow(() -> new IllegalStateException("Ambulance not found."));
+        Hospital hospital = lockHospital(hospitalId)
+                .orElseThrow(() -> new IllegalStateException("Target hospital not found."));
+
+        if (trip.status() == TripStatus.COMPLETED || trip.status() == TripStatus.CANCELLED) {
+            throw new IllegalStateException("Completed or cancelled trips cannot be rerouted.");
+        }
+        if (trip.hospitalId().equals(hospitalId)) {
+            throw new IllegalStateException("Trip is already assigned to this hospital.");
+        }
+        if (!ambulance.type().canHandle(requiredAmbulanceType(incident.condition(), incident.priority()))) {
+            throw new IllegalStateException("Ambulance capability no longer satisfies the incident.");
+        }
+        if (!hospital.canTreat(incident.condition())) {
+            throw new IllegalStateException("Target hospital cannot treat this condition.");
+        }
+        if (!hospital.hasCapacity()) {
+            throw new IllegalStateException("Target hospital has no capacity.");
+        }
+
+        Instant now = Instant.now();
+        String decisionId = newId("DEC");
+
+        jdbc.update("""
+                UPDATE hospitals
+                SET available_beds = available_beds - 1, updated_at = ?
+                WHERE id = ? AND available_beds > 0
+                """, Timestamp.from(now), hospitalId);
+
+        jdbc.update("""
+                UPDATE trips
+                SET hospital_id = ?, pickup_eta_minutes = ?, hospital_eta_minutes = ?, total_cost = ?
+                WHERE id = ?
+                """,
+                hospitalId,
+                winningScore.pickupEtaMinutes(),
+                winningScore.hospitalEtaMinutes(),
+                winningScore.totalCost(),
+                tripId
+        );
+
+        jdbc.update("""
+                INSERT INTO dispatch_decisions (id, incident_id, ambulance_id, hospital_id, pickup_eta_minutes,
+                                                hospital_eta_minutes, hospital_load, quality_penalty,
+                                                type_penalty, total_cost, explanation, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                decisionId,
+                trip.incidentId(),
+                trip.ambulanceId(),
+                hospitalId,
+                winningScore.pickupEtaMinutes(),
+                winningScore.hospitalEtaMinutes(),
+                winningScore.hospitalLoad(),
+                winningScore.qualityPenalty(),
+                winningScore.typePenalty(),
+                winningScore.totalCost(),
+                "Reroute: " + winningScore.explanation(),
+                Timestamp.from(now)
+        );
+
+        insertCandidateScores(decisionId, alternatives);
+
+        appendOutbox("Trip", tripId, "trip.rerouted", Map.of(
+                "tripId", tripId,
+                "incidentId", trip.incidentId(),
+                "ambulanceId", trip.ambulanceId(),
+                "fromHospitalId", trip.hospitalId(),
+                "toHospitalId", hospitalId,
+                "decisionId", decisionId,
+                "totalCost", winningScore.totalCost()
+        ), now);
+
+        return findTrip(tripId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
     public void reset() {
         jdbc.execute("""
                 TRUNCATE TABLE dispatch_candidate_scores, dispatch_decisions, outbox_events,
@@ -320,6 +495,16 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 WHERE id = ?
                 FOR UPDATE
                 """, hospitalMapper(specialties), id);
+    }
+
+    private Optional<Trip> lockTrip(String id) {
+        return queryOptional("""
+                SELECT id, incident_id, ambulance_id, hospital_id, pickup_eta_minutes,
+                       hospital_eta_minutes, total_cost, created_at, status
+                FROM trips
+                WHERE id = ?
+                FOR UPDATE
+                """, tripMapper(), id);
     }
 
     private void insertCandidateScores(String decisionId, List<CandidateScore> alternatives) {
@@ -575,4 +760,3 @@ public class JdbcLifeLineStore implements LifeLineStore {
         };
     }
 }
-
