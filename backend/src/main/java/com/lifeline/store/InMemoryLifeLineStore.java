@@ -16,6 +16,7 @@ import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
+import com.lifeline.simulation.SimulationResult;
 import jakarta.annotation.PostConstruct;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -40,6 +41,7 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     private final List<DispatchAuditRecord> dispatchDecisions = new ArrayList<>();
     private final List<OutboxEvent> outboxEvents = new ArrayList<>();
     private final List<Notification> notifications = new ArrayList<>();
+    private final List<SimulationResult> simulations = new ArrayList<>();
 
     @PostConstruct
     public void seed() {
@@ -54,6 +56,7 @@ public class InMemoryLifeLineStore implements LifeLineStore {
         dispatchDecisions.clear();
         outboxEvents.clear();
         notifications.clear();
+        simulations.clear();
 
         addAmbulance(new Ambulance("AMB-101", "Aster Alpha", AmbulanceType.ALS, AmbulanceStatus.AVAILABLE, new Location(12.9719, 77.6412), "Indiranagar"));
         addAmbulance(new Ambulance("AMB-102", "Pulse Bravo", AmbulanceType.BLS, AmbulanceStatus.AVAILABLE, new Location(12.9352, 77.6245), "Koramangala"));
@@ -107,6 +110,13 @@ public class InMemoryLifeLineStore implements LifeLineStore {
         return notifications.stream()
                 .filter(notification -> notification.role() == role)
                 .sorted(Comparator.comparing(Notification::createdAt).reversed())
+                .toList();
+    }
+
+    @Override
+    public synchronized List<SimulationResult> simulations() {
+        return simulations.stream()
+                .sorted(Comparator.comparing(SimulationResult::createdAt).reversed())
                 .toList();
     }
 
@@ -165,6 +175,13 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     @Override
     public synchronized Optional<Trip> findTrip(String id) {
         return Optional.ofNullable(trips.get(id));
+    }
+
+    @Override
+    public synchronized Optional<SimulationResult> findSimulation(String id) {
+        return simulations.stream()
+                .filter(simulation -> simulation.id().equals(id))
+                .findFirst();
     }
 
     public synchronized Incident saveIncident(Incident incident) {
@@ -389,6 +406,12 @@ public class InMemoryLifeLineStore implements LifeLineStore {
             }
         }
         throw new IllegalStateException("Notification not found.");
+    }
+
+    @Override
+    public synchronized SimulationResult saveSimulationResult(SimulationResult result) {
+        simulations.addFirst(result);
+        return result;
     }
 
     private void addAmbulance(Ambulance ambulance) {

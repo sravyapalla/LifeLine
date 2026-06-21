@@ -21,6 +21,9 @@ import com.lifeline.outbox.OutboxSummary;
 import com.lifeline.outbox.OutboxSummaryService;
 import com.lifeline.location.AmbulanceLocationProjection;
 import com.lifeline.notifications.NotificationService;
+import com.lifeline.simulation.SimulationRequest;
+import com.lifeline.simulation.SimulationResult;
+import com.lifeline.simulation.SimulationService;
 import com.lifeline.store.LifeLineStore;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -49,6 +52,7 @@ public class LifeLineController {
     private final OutboxSummaryService outboxSummaryService;
     private final AmbulanceLocationProjection ambulanceLocationProjection;
     private final NotificationService notificationService;
+    private final SimulationService simulationService;
 
     public LifeLineController(
             LifeLineStore store,
@@ -56,7 +60,8 @@ public class LifeLineController {
             OutboxProcessor outboxProcessor,
             OutboxSummaryService outboxSummaryService,
             AmbulanceLocationProjection ambulanceLocationProjection,
-            NotificationService notificationService
+            NotificationService notificationService,
+            SimulationService simulationService
     ) {
         this.store = store;
         this.dispatchEngine = dispatchEngine;
@@ -64,6 +69,7 @@ public class LifeLineController {
         this.outboxSummaryService = outboxSummaryService;
         this.ambulanceLocationProjection = ambulanceLocationProjection;
         this.notificationService = notificationService;
+        this.simulationService = simulationService;
     }
 
     @GetMapping("/ambulances")
@@ -114,6 +120,22 @@ public class LifeLineController {
     @PostMapping("/notifications/{notificationId}/ack")
     public Notification acknowledgeNotification(@PathVariable String notificationId) {
         return notificationService.acknowledge(notificationId);
+    }
+
+    @GetMapping("/simulations")
+    public List<SimulationResult> simulations() {
+        return simulationService.simulations();
+    }
+
+    @GetMapping("/simulations/{simulationId}")
+    public SimulationResult simulation(@PathVariable String simulationId) {
+        return simulationService.simulation(simulationId);
+    }
+
+    @PostMapping("/simulations")
+    @ResponseStatus(HttpStatus.CREATED)
+    public SimulationResult runSimulation(@Valid @RequestBody SimulationRequest request) {
+        return simulationService.run(request);
     }
 
     @GetMapping("/outbox-events/summary")
