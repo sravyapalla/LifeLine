@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Activity,
   Ambulance as AmbulanceIcon,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
   Bed,
   BellPlus,
   CheckCircle2,
@@ -25,11 +29,13 @@ import {
   publishOutboxEvents,
   rerouteTrip,
   resetDemo,
+  updateAmbulanceLocation,
   updateHospitalCapacity,
   updateTripStatus
 } from './api';
 import type {
   Ambulance,
+  AmbulanceLocationSnapshot,
   CreateIncidentPayload,
   DispatchAuditRecord,
   DispatchResponse,
@@ -49,6 +55,7 @@ type Role = 'patient' | 'driver' | 'hospital' | 'control';
 
 interface DashboardState {
   ambulances: Ambulance[];
+  liveLocations: AmbulanceLocationSnapshot[];
   hospitals: Hospital[];
   incidents: Incident[];
   trips: Trip[];
@@ -196,6 +203,22 @@ export default function App() {
     }
   }
 
+  async function handleMoveAmbulance(ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) {
+    setBusy(true);
+    setError('');
+    try {
+      await updateAmbulanceLocation(ambulance.id, {
+        latitude: Number((ambulance.location.latitude + deltaLatitude).toFixed(5)),
+        longitude: Number((ambulance.location.longitude + deltaLongitude).toFixed(5))
+      });
+      await load();
+    } catch (locationError) {
+      setError((locationError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleReroute(tripId: string) {
     setBusy(true);
     setError('');
@@ -308,6 +331,7 @@ export default function App() {
           selectedTripId={selectedTripId}
           setSelectedTripId={setSelectedTripId}
           onTripStatus={handleTripStatus}
+          onMoveAmbulance={handleMoveAmbulance}
           busy={busy}
         />
       )}
@@ -334,6 +358,7 @@ export default function App() {
           setSelectedTripId={setSelectedTripId}
           onDispatch={handleDispatch}
           onReroute={handleReroute}
+          onMoveAmbulance={handleMoveAmbulance}
           onPublishOutbox={handlePublishOutbox}
           lastDecision={lastDecision}
           lastOutboxPublish={lastOutboxPublish}
@@ -383,6 +408,7 @@ function PatientView({
       <section className="map-stage">
         <MapPanel
           ambulances={data?.ambulances ?? []}
+          liveLocations={data?.liveLocations ?? []}
           hospitals={data?.hospitals ?? []}
           incidents={data?.incidents ?? []}
           trips={data?.trips ?? []}
@@ -440,12 +466,14 @@ function DriverView({
   selectedTripId,
   setSelectedTripId,
   onTripStatus,
+  onMoveAmbulance,
   busy
 }: {
   data: DashboardState | null;
   selectedTripId: string;
   setSelectedTripId: (id: string) => void;
   onTripStatus: (tripId: string, status: TripStatus) => void;
+  onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
   busy: boolean;
 }) {
   const selectedTrip = data?.trips.find((trip) => trip.id === selectedTripId) ?? null;
@@ -463,11 +491,13 @@ function DriverView({
 
         <div className="resource-list">
           {data?.ambulances.map((ambulance) => (
-            <div className="resource-row" key={ambulance.id}>
-              <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
-              <span>{ambulance.callSign}</span>
-              <em>{formatStatus(ambulance.status)}</em>
-            </div>
+            <LiveAmbulanceRow
+              key={ambulance.id}
+              ambulance={ambulance}
+              liveLocation={data.liveLocations.find((location) => location.ambulanceId === ambulance.id) ?? null}
+              onMoveAmbulance={onMoveAmbulance}
+              busy={busy}
+            />
           ))}
         </div>
       </aside>
@@ -505,6 +535,7 @@ function DriverView({
         </div>
         <MapPanel
           ambulances={data?.ambulances ?? []}
+          liveLocations={data?.liveLocations ?? []}
           hospitals={data?.hospitals ?? []}
           incidents={data?.incidents ?? []}
           trips={data?.trips ?? []}
@@ -595,6 +626,7 @@ function ControlView({
   setSelectedTripId,
   onDispatch,
   onReroute,
+  onMoveAmbulance,
   onPublishOutbox,
   lastDecision,
   lastOutboxPublish,
@@ -609,6 +641,7 @@ function ControlView({
   setSelectedTripId: (id: string) => void;
   onDispatch: (incidentId?: string) => void;
   onReroute: (tripId: string) => void;
+  onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
   onPublishOutbox: () => void;
   lastDecision: DispatchResponse | null;
   lastOutboxPublish: OutboxPublishResponse | null;
@@ -665,6 +698,7 @@ function ControlView({
       <section className="map-stage">
         <MapPanel
           ambulances={data?.ambulances ?? []}
+          liveLocations={data?.liveLocations ?? []}
           hospitals={data?.hospitals ?? []}
           incidents={data?.incidents ?? []}
           trips={data?.trips ?? []}
@@ -706,6 +740,19 @@ function ControlView({
         )}
 
         {lastDecision && <DecisionResult decision={lastDecision} />}
+
+        <div className="compact-list bordered">
+          <h3>Live Fleet</h3>
+          {data?.ambulances.slice(0, 4).map((ambulance) => (
+            <LiveAmbulanceRow
+              key={ambulance.id}
+              ambulance={ambulance}
+              liveLocation={data.liveLocations.find((location) => location.ambulanceId === ambulance.id) ?? null}
+              onMoveAmbulance={onMoveAmbulance}
+              busy={busy}
+            />
+          ))}
+        </div>
 
         <OutboxPanel
           pending={data?.metrics.pendingOutboxEvents ?? 0}
@@ -771,6 +818,44 @@ function IncidentForm({
       <button className="primary-button" type="button" onClick={onSubmit} disabled={busy}>
         {submitLabel}
       </button>
+    </div>
+  );
+}
+
+function LiveAmbulanceRow({
+  ambulance,
+  liveLocation,
+  onMoveAmbulance,
+  busy
+}: {
+  ambulance: Ambulance;
+  liveLocation: AmbulanceLocationSnapshot | null;
+  onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
+  busy: boolean;
+}) {
+  const step = 0.006;
+
+  return (
+    <div className="resource-row live-row">
+      <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
+      <span>
+        <strong>{ambulance.callSign}</strong>
+        <small>{liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : ambulance.baseStation}</small>
+      </span>
+      <div className="movement-controls" aria-label={`Move ${ambulance.callSign}`}>
+        <button type="button" onClick={() => onMoveAmbulance(ambulance, step, 0)} disabled={busy} title="Move north" aria-label="Move north">
+          <ArrowUp size={14} />
+        </button>
+        <button type="button" onClick={() => onMoveAmbulance(ambulance, 0, -step)} disabled={busy} title="Move west" aria-label="Move west">
+          <ArrowLeft size={14} />
+        </button>
+        <button type="button" onClick={() => onMoveAmbulance(ambulance, 0, step)} disabled={busy} title="Move east" aria-label="Move east">
+          <ArrowRight size={14} />
+        </button>
+        <button type="button" onClick={() => onMoveAmbulance(ambulance, -step, 0)} disabled={busy} title="Move south" aria-label="Move south">
+          <ArrowDown size={14} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -1019,6 +1104,7 @@ function MetricCard({ icon, label, value, tone }: { icon: ReactNode; label: stri
 
 function MapPanel({
   ambulances,
+  liveLocations,
   hospitals,
   incidents,
   trips,
@@ -1027,6 +1113,7 @@ function MapPanel({
   compact = false
 }: {
   ambulances: Ambulance[];
+  liveLocations: AmbulanceLocationSnapshot[];
   hospitals: Hospital[];
   incidents: Incident[];
   trips: Trip[];
@@ -1069,18 +1156,12 @@ function MapPanel({
           </CircleMarker>
         ))}
         {ambulances.map((ambulance) => (
-          <CircleMarker
+          <AmbulanceMarker
             key={ambulance.id}
-            center={[ambulance.location.latitude, ambulance.location.longitude]}
-            radius={ambulance.id === selectedTrip?.ambulanceId ? 11 : ambulance.status === 'AVAILABLE' ? 8 : 6}
-            pathOptions={{ color: '#1d4ed8', fillColor: ambulance.status === 'AVAILABLE' ? '#3b82f6' : '#94a3b8', fillOpacity: 0.9 }}
-          >
-            <Popup>
-              <strong>{ambulance.callSign}</strong>
-              <br />
-              {ambulance.type} - {formatStatus(ambulance.status)}
-            </Popup>
-          </CircleMarker>
+            ambulance={ambulance}
+            selected={ambulance.id === selectedTrip?.ambulanceId}
+            liveLocation={liveLocations.find((location) => location.ambulanceId === ambulance.id) ?? null}
+          />
         ))}
         {incidents.map((incident) => (
           <CircleMarker
@@ -1098,6 +1179,32 @@ function MapPanel({
         ))}
       </MapContainer>
     </div>
+  );
+}
+
+function AmbulanceMarker({
+  ambulance,
+  selected,
+  liveLocation
+}: {
+  ambulance: Ambulance;
+  selected: boolean;
+  liveLocation: AmbulanceLocationSnapshot | null;
+}) {
+  return (
+    <CircleMarker
+      center={[ambulance.location.latitude, ambulance.location.longitude]}
+      radius={selected ? 11 : ambulance.status === 'AVAILABLE' ? 8 : 6}
+      pathOptions={{ color: liveLocation ? '#0f766e' : '#1d4ed8', fillColor: ambulance.status === 'AVAILABLE' ? '#3b82f6' : '#94a3b8', fillOpacity: 0.9 }}
+    >
+      <Popup>
+        <strong>{ambulance.callSign}</strong>
+        <br />
+        {ambulance.type} - {formatStatus(ambulance.status)}
+        <br />
+        {liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : ambulance.baseStation}
+      </Popup>
+    </CircleMarker>
   );
 }
 
@@ -1141,4 +1248,11 @@ function formatDuration(seconds: number) {
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
+}
+
+function formatRelativeTime(value: string) {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return `${Math.floor(seconds / 3600)}h ago`;
 }

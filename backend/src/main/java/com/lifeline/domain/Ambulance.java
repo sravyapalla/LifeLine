@@ -11,5 +11,8 @@ public record Ambulance(
     public Ambulance withStatus(AmbulanceStatus nextStatus) {
         return new Ambulance(id, callSign, type, nextStatus, location, baseStation);
     }
-}
 
+    public Ambulance withLocation(Location nextLocation) {
+        return new Ambulance(id, callSign, type, status, nextLocation, baseStation);
+    }
+}

@@ -4,6 +4,7 @@ import com.lifeline.dispatch.DispatchDecision;
 import com.lifeline.dispatch.DispatchEngine;
 import com.lifeline.dispatch.NoDispatchCandidateException;
 import com.lifeline.domain.Ambulance;
+import com.lifeline.domain.AmbulanceLocationSnapshot;
 import com.lifeline.domain.AmbulanceStatus;
 import com.lifeline.domain.DispatchAuditRecord;
 import com.lifeline.domain.Hospital;
@@ -16,6 +17,7 @@ import com.lifeline.outbox.OutboxProcessor;
 import com.lifeline.outbox.OutboxPublishResult;
 import com.lifeline.outbox.OutboxSummary;
 import com.lifeline.outbox.OutboxSummaryService;
+import com.lifeline.location.AmbulanceLocationProjection;
 import com.lifeline.store.LifeLineStore;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -41,22 +43,30 @@ public class LifeLineController {
     private final DispatchEngine dispatchEngine;
     private final OutboxProcessor outboxProcessor;
     private final OutboxSummaryService outboxSummaryService;
+    private final AmbulanceLocationProjection ambulanceLocationProjection;
 
     public LifeLineController(
             LifeLineStore store,
             DispatchEngine dispatchEngine,
             OutboxProcessor outboxProcessor,
-            OutboxSummaryService outboxSummaryService
+            OutboxSummaryService outboxSummaryService,
+            AmbulanceLocationProjection ambulanceLocationProjection
     ) {
         this.store = store;
         this.dispatchEngine = dispatchEngine;
         this.outboxProcessor = outboxProcessor;
         this.outboxSummaryService = outboxSummaryService;
+        this.ambulanceLocationProjection = ambulanceLocationProjection;
     }
 
     @GetMapping("/ambulances")
     public List<Ambulance> ambulances() {
-        return store.ambulances();
+        return ambulanceLocationProjection.applyTo(store.ambulances());
+    }
+
+    @GetMapping("/ambulance-locations")
+    public List<AmbulanceLocationSnapshot> ambulanceLocations() {
+        return ambulanceLocationProjection.snapshots();
     }
 
     @GetMapping("/hospitals")
@@ -97,7 +107,7 @@ public class LifeLineController {
     @GetMapping("/metrics")
     public MetricsResponse metrics() {
         List<Incident> incidents = store.incidents();
-        List<Ambulance> ambulances = store.ambulances();
+        List<Ambulance> ambulances = ambulanceLocationProjection.applyTo(store.ambulances());
         List<Hospital> hospitals = store.hospitals();
         List<Trip> trips = store.trips();
 
@@ -136,12 +146,26 @@ public class LifeLineController {
         );
     }
 
+    @PostMapping("/ambulances/{ambulanceId}/location")
+    public AmbulanceLocationSnapshot updateAmbulanceLocation(
+            @PathVariable String ambulanceId,
+            @Valid @RequestBody UpdateAmbulanceLocationRequest request
+    ) {
+        store.findAmbulance(ambulanceId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ambulance not found."));
+        return ambulanceLocationProjection.update(
+                ambulanceId,
+                new Location(request.latitude(), request.longitude()),
+                Instant.now()
+        );
+    }
+
     @PostMapping("/dispatch")
     public DispatchResponse dispatch(@Valid @RequestBody DispatchRequest request) {
         Incident incident = store.findIncident(request.incidentId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Incident not found."));
 
-        DispatchDecision decision = dispatchEngine.decide(incident, store.ambulances(), store.hospitals());
+        DispatchDecision decision = dispatchEngine.decide(incident, ambulanceLocationProjection.applyTo(store.ambulances()), store.hospitals());
         Trip trip = store.commitAssignment(
                 incident.id(),
                 decision.ambulance().id(),
@@ -151,7 +175,7 @@ public class LifeLineController {
         );
 
         Incident updatedIncident = store.findIncident(incident.id()).orElseThrow();
-        Ambulance updatedAmbulance = store.findAmbulance(decision.ambulance().id()).orElseThrow();
+        Ambulance updatedAmbulance = ambulanceLocationProjection.applyTo(store.findAmbulance(decision.ambulance().id()).orElseThrow());
         Hospital updatedHospital = store.findHospital(decision.hospital().id()).orElseThrow();
 
         return new DispatchResponse(
@@ -189,7 +213,12 @@ public class LifeLineController {
         Ambulance ambulance = store.findAmbulance(trip.ambulanceId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ambulance not found."));
 
-        DispatchDecision decision = dispatchEngine.rerouteHospital(incident, ambulance, trip.hospitalId(), store.hospitals());
+        DispatchDecision decision = dispatchEngine.rerouteHospital(
+                incident,
+                ambulanceLocationProjection.applyTo(ambulance),
+                trip.hospitalId(),
+                store.hospitals()
+        );
         Trip updatedTrip = store.rerouteTrip(
                 trip.id(),
                 decision.hospital().id(),
@@ -198,7 +227,7 @@ public class LifeLineController {
         );
 
         Incident updatedIncident = store.findIncident(incident.id()).orElseThrow();
-        Ambulance updatedAmbulance = store.findAmbulance(ambulance.id()).orElseThrow();
+        Ambulance updatedAmbulance = ambulanceLocationProjection.applyTo(store.findAmbulance(ambulance.id()).orElseThrow());
         Hospital updatedHospital = store.findHospital(decision.hospital().id()).orElseThrow();
 
         return new DispatchResponse(
@@ -214,6 +243,7 @@ public class LifeLineController {
     @PostMapping("/demo/reset")
     public void resetDemo() {
         store.reset();
+        ambulanceLocationProjection.clear();
     }
 
     @ExceptionHandler(NoDispatchCandidateException.class)

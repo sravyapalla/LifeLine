@@ -579,6 +579,55 @@ button {
   white-space: nowrap;
 }
 
+.live-row {
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+}
+
+.live-row > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.live-row strong,
+.live-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.live-row small {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.movement-controls {
+  display: grid;
+  gap: 3px;
+  grid-template-columns: repeat(2, 24px);
+}
+
+.movement-controls button {
+  align-items: center;
+  background: #e0f2fe;
+  border: 0;
+  border-radius: 6px;
+  color: #075985;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  width: 24px;
+}
+
+.movement-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .resource-dot.available {
   background: #14b8a6;
 }

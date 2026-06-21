@@ -1,5 +1,6 @@
 import type {
   Ambulance,
+  AmbulanceLocationSnapshot,
   CreateIncidentPayload,
   DispatchAuditRecord,
   DispatchResponse,
@@ -10,7 +11,8 @@ import type {
   OutboxPublishResponse,
   OutboxSummary,
   Trip,
-  TripStatus
+  TripStatus,
+  UpdateAmbulanceLocationPayload
 } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api';
@@ -38,8 +40,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function getDashboardData() {
-  const [ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics] = await Promise.all([
+  const [ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics] = await Promise.all([
     request<Ambulance[]>('/ambulances'),
+    request<AmbulanceLocationSnapshot[]>('/ambulance-locations'),
     request<Hospital[]>('/hospitals'),
     request<Incident[]>('/incidents'),
     request<Trip[]>('/trips'),
@@ -49,7 +52,7 @@ export async function getDashboardData() {
     request<Metrics>('/metrics')
   ]);
 
-  return { ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics };
+  return { ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics };
 }
 
 export function createIncident(payload: CreateIncidentPayload) {
@@ -95,5 +98,12 @@ export function rerouteTrip(tripId: string) {
 export function publishOutboxEvents() {
   return request<OutboxPublishResponse>('/outbox-events/publish', {
     method: 'POST'
+  });
+}
+
+export function updateAmbulanceLocation(ambulanceId: string, payload: UpdateAmbulanceLocationPayload) {
+  return request<AmbulanceLocationSnapshot>(`/ambulances/${ambulanceId}/location`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
   });
 }

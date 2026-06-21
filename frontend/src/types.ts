@@ -19,6 +19,14 @@ export interface Ambulance {
   baseStation: string;
 }
 
+export interface AmbulanceLocationSnapshot {
+  ambulanceId: string;
+  location: Location;
+  updatedAt: string;
+  expiresAt: string;
+  source: string;
+}
+
 export interface Hospital {
   id: string;
   name: string;
@@ -146,6 +154,11 @@ export interface CreateIncidentPayload {
   phone: string;
   condition: EmergencyCondition;
   priority: IncidentPriority;
+  latitude: number;
+  longitude: number;
+}
+
+export interface UpdateAmbulanceLocationPayload {
   latitude: number;
   longitude: number;
 }
