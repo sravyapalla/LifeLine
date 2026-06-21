@@ -16,6 +16,7 @@ import com.lifeline.domain.Location;
 import com.lifeline.domain.Notification;
 import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
+import com.lifeline.domain.SecurityAuditEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
 import com.lifeline.simulation.OptimizationStrategy;
@@ -135,6 +136,17 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 rs.getString("request"),
                 instant(rs, "created_at")
         ));
+    }
+
+    @Override
+    public List<SecurityAuditEvent> securityAuditEvents(int limit) {
+        return jdbc.query("""
+                SELECT id, actor_user_id, actor_role, action, resource_type, resource_id,
+                       outcome, reason, metadata::text AS metadata, created_at
+                FROM security_audit_events
+                ORDER BY created_at DESC
+                LIMIT ?
+                """, securityAuditEventMapper(), limit);
     }
 
     @Override
@@ -681,6 +693,29 @@ public class JdbcLifeLineStore implements LifeLineStore {
     }
 
     @Override
+    public SecurityAuditEvent addSecurityAuditEvent(SecurityAuditEvent event) {
+        jdbc.update("""
+                INSERT INTO security_audit_events (
+                    id, actor_user_id, actor_role, action, resource_type, resource_id,
+                    outcome, reason, metadata, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), ?)
+                """,
+                event.id(),
+                event.actorUserId(),
+                event.actorRole(),
+                event.action(),
+                event.resourceType(),
+                event.resourceId(),
+                event.outcome(),
+                event.reason(),
+                event.metadata(),
+                Timestamp.from(event.createdAt())
+        );
+        return event;
+    }
+
+    @Override
     @Transactional
     public void reset() {
         jdbc.execute("""
@@ -963,6 +998,21 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 rs.getString("event_type"),
                 instant(rs, "created_at"),
                 instant(rs, "acknowledged_at")
+        );
+    }
+
+    private RowMapper<SecurityAuditEvent> securityAuditEventMapper() {
+        return (rs, rowNum) -> new SecurityAuditEvent(
+                rs.getString("id"),
+                rs.getString("actor_user_id"),
+                rs.getString("actor_role"),
+                rs.getString("action"),
+                rs.getString("resource_type"),
+                rs.getString("resource_id"),
+                rs.getString("outcome"),
+                rs.getString("reason"),
+                rs.getString("metadata"),
+                instant(rs, "created_at")
         );
     }
 

@@ -14,6 +14,7 @@ import com.lifeline.domain.Location;
 import com.lifeline.domain.Notification;
 import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
+import com.lifeline.domain.SecurityAuditEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
 import com.lifeline.simulation.SimulationResult;
@@ -42,6 +43,7 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     private final List<OutboxEvent> outboxEvents = new ArrayList<>();
     private final List<Notification> notifications = new ArrayList<>();
     private final List<SimulationResult> simulations = new ArrayList<>();
+    private final List<SecurityAuditEvent> securityAuditEvents = new ArrayList<>();
 
     @PostConstruct
     public void seed() {
@@ -117,6 +119,14 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     public synchronized List<SimulationResult> simulations() {
         return simulations.stream()
                 .sorted(Comparator.comparing(SimulationResult::createdAt).reversed())
+                .toList();
+    }
+
+    @Override
+    public synchronized List<SecurityAuditEvent> securityAuditEvents(int limit) {
+        return securityAuditEvents.stream()
+                .sorted(Comparator.comparing(SecurityAuditEvent::createdAt).reversed())
+                .limit(limit)
                 .toList();
     }
 
@@ -413,6 +423,12 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     public synchronized SimulationResult saveSimulationResult(SimulationResult result) {
         simulations.addFirst(result);
         return result;
+    }
+
+    @Override
+    public synchronized SecurityAuditEvent addSecurityAuditEvent(SecurityAuditEvent event) {
+        securityAuditEvents.addFirst(event);
+        return event;
     }
 
     private void addAmbulance(Ambulance ambulance) {

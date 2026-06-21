@@ -11,6 +11,7 @@ import com.lifeline.domain.Location;
 import com.lifeline.domain.Notification;
 import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
+import com.lifeline.domain.SecurityAuditEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
 import com.lifeline.simulation.SimulationResult;
@@ -35,6 +36,8 @@ public interface LifeLineStore {
     List<Notification> notifications(NotificationRole role);
 
     List<SimulationResult> simulations();
+
+    List<SecurityAuditEvent> securityAuditEvents(int limit);
 
     List<OutboxEvent> pendingOutboxEvents(int limit);
 
@@ -103,6 +106,8 @@ public interface LifeLineStore {
     Notification acknowledgeNotification(String notificationId);
 
     SimulationResult saveSimulationResult(SimulationResult result);
+
+    SecurityAuditEvent addSecurityAuditEvent(SecurityAuditEvent event);
 
     void reset();
 }

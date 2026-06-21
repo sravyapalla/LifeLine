@@ -14,6 +14,7 @@ import com.lifeline.domain.Location;
 import com.lifeline.domain.Notification;
 import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
+import com.lifeline.domain.SecurityAuditEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.location.AmbulanceLocationProjection;
 import com.lifeline.notifications.NotificationService;
@@ -23,6 +24,7 @@ import com.lifeline.outbox.OutboxSummary;
 import com.lifeline.outbox.OutboxSummaryService;
 import com.lifeline.security.AuthenticatedUser;
 import com.lifeline.security.CurrentUserService;
+import com.lifeline.security.SecurityAuditService;
 import com.lifeline.security.UserRole;
 import com.lifeline.simulation.SimulationRequest;
 import com.lifeline.simulation.SimulationResult;
@@ -43,6 +45,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -57,6 +60,7 @@ public class LifeLineController {
     private final NotificationService notificationService;
     private final SimulationService simulationService;
     private final CurrentUserService currentUserService;
+    private final SecurityAuditService auditService;
 
     public LifeLineController(
             LifeLineStore store,
@@ -66,7 +70,8 @@ public class LifeLineController {
             AmbulanceLocationProjection ambulanceLocationProjection,
             NotificationService notificationService,
             SimulationService simulationService,
-            CurrentUserService currentUserService
+            CurrentUserService currentUserService,
+            SecurityAuditService auditService
     ) {
         this.store = store;
         this.dispatchEngine = dispatchEngine;
@@ -76,6 +81,7 @@ public class LifeLineController {
         this.notificationService = notificationService;
         this.simulationService = simulationService;
         this.currentUserService = currentUserService;
+        this.auditService = auditService;
     }
 
     @GetMapping("/ambulances")
@@ -138,7 +144,7 @@ public class LifeLineController {
         AuthenticatedUser user = currentUser();
         NotificationRole requestedRole = parseRole(role);
         if (!user.isControl() && requestedRole != notificationRole(user)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Cannot read another role's notifications.");
+            throw forbidden(user, "notification.read", "NotificationRole", requestedRole.name(), "Cannot read another role's notifications.");
         }
         return notificationService.notificationsFor(requestedRole);
     }
@@ -150,10 +156,27 @@ public class LifeLineController {
             boolean ownsNotification = notificationService.notificationsFor(notificationRole(user)).stream()
                     .anyMatch(notification -> notification.id().equals(notificationId));
             if (!ownsNotification) {
+                auditService.denied(
+                        user,
+                        "notification.ack",
+                        "Notification",
+                        notificationId,
+                        "Notification is outside the actor role scope.",
+                        Map.of()
+                );
                 throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Notification not found.");
             }
         }
-        return notificationService.acknowledge(notificationId);
+        Notification notification = notificationService.acknowledge(notificationId);
+        auditService.allowed(
+                user,
+                "notification.ack",
+                "Notification",
+                notificationId,
+                "Notification acknowledged.",
+                Map.of("role", notification.role().name(), "eventType", notification.eventType())
+        );
+        return notification;
     }
 
     @GetMapping("/simulations")
@@ -170,12 +193,28 @@ public class LifeLineController {
         return simulationService.simulation(simulationId);
     }
 
+    @GetMapping("/audit-events")
+    public List<SecurityAuditEvent> auditEvents(@RequestParam(defaultValue = "100") int limit) {
+        AuthenticatedUser user = currentUser();
+        requireControl(user, "Only control can view security audit events.");
+        return auditService.events(limit);
+    }
+
     @PostMapping("/simulations")
     @ResponseStatus(HttpStatus.CREATED)
     public SimulationResult runSimulation(@Valid @RequestBody SimulationRequest request) {
         AuthenticatedUser user = currentUser();
         requireControl(user, "Only control can run simulations.");
-        return simulationService.run(request);
+        SimulationResult result = simulationService.run(request);
+        auditService.allowed(
+                user,
+                "simulation.run",
+                "Simulation",
+                result.id(),
+                "Simulation run created.",
+                Map.of("incidentCount", request.incidentCount(), "strategy", request.strategy().name())
+        );
+        return result;
     }
 
     @GetMapping("/outbox-events/summary")
@@ -227,7 +266,16 @@ public class LifeLineController {
     public OutboxPublishResult publishOutboxEvents() {
         AuthenticatedUser user = currentUser();
         requireControl(user, "Only control can publish outbox events.");
-        return outboxProcessor.publishPendingNow();
+        OutboxPublishResult result = outboxProcessor.publishPendingNow();
+        auditService.allowed(
+                user,
+                "outbox.publish",
+                "Outbox",
+                "pending",
+                "Pending outbox events published.",
+                Map.of("published", result.published(), "failed", result.failed(), "pending", result.pending())
+        );
+        return result;
     }
 
     @PostMapping("/incidents")
@@ -235,7 +283,7 @@ public class LifeLineController {
     public IncidentView createIncident(@Valid @RequestBody CreateIncidentRequest request) {
         AuthenticatedUser user = currentUser();
         if (user.role() != UserRole.PATIENT && !user.isControl()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only patients and control can create incidents.");
+            throw forbidden(user, "incident.create", "Incident", "new", "Only patients and control can create incidents.");
         }
         Incident incident = store.createIncident(
                 user.username(),
@@ -244,6 +292,14 @@ public class LifeLineController {
                 request.condition(),
                 request.priority(),
                 new Location(request.latitude(), request.longitude())
+        );
+        auditService.allowed(
+                user,
+                "incident.create",
+                "Incident",
+                incident.id(),
+                "Incident created.",
+                Map.of("condition", incident.condition().name(), "priority", incident.priority().name())
         );
         return incidentView(incident, user);
     }
@@ -255,15 +311,24 @@ public class LifeLineController {
     ) {
         AuthenticatedUser user = currentUser();
         if (!user.isControl() && (user.role() != UserRole.DRIVER || !ambulanceId.equals(user.ambulanceId()))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Drivers can update only their assigned ambulance.");
+            throw forbidden(user, "ambulance.location.update", "Ambulance", ambulanceId, "Drivers can update only their assigned ambulance.");
         }
         store.findAmbulance(ambulanceId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ambulance not found."));
-        return ambulanceLocationProjection.update(
+        AmbulanceLocationSnapshot snapshot = ambulanceLocationProjection.update(
                 ambulanceId,
                 new Location(request.latitude(), request.longitude()),
                 Instant.now()
         );
+        auditService.allowed(
+                user,
+                "ambulance.location.update",
+                "Ambulance",
+                ambulanceId,
+                "Ambulance location updated.",
+                Map.of("latitude", request.latitude(), "longitude", request.longitude())
+        );
+        return snapshot;
     }
 
     @PostMapping("/dispatch")
@@ -286,6 +351,15 @@ public class LifeLineController {
         Ambulance updatedAmbulance = ambulanceLocationProjection.applyTo(store.findAmbulance(decision.ambulance().id()).orElseThrow());
         Hospital updatedHospital = store.findHospital(decision.hospital().id()).orElseThrow();
 
+        auditService.allowed(
+                user,
+                "dispatch.reserve",
+                "Trip",
+                trip.id(),
+                "Incident dispatched.",
+                Map.of("incidentId", incident.id(), "ambulanceId", trip.ambulanceId(), "hospitalId", trip.hospitalId())
+        );
+
         return new DispatchResponse(
                 incidentView(updatedIncident, user),
                 updatedAmbulance,
@@ -305,9 +379,18 @@ public class LifeLineController {
         Trip trip = store.findTrip(tripId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trip not found."));
         if (!user.isControl() && (user.role() != UserRole.DRIVER || !trip.ambulanceId().equals(user.ambulanceId()))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Drivers can update only their assigned trips.");
+            throw forbidden(user, "trip.status.update", "Trip", tripId, "Drivers can update only their assigned trips.");
         }
-        return store.updateTripStatus(tripId, request.status());
+        Trip updatedTrip = store.updateTripStatus(tripId, request.status());
+        auditService.allowed(
+                user,
+                "trip.status.update",
+                "Trip",
+                tripId,
+                "Trip status updated.",
+                Map.of("status", request.status().name())
+        );
+        return updatedTrip;
     }
 
     @PostMapping("/hospitals/{hospitalId}/capacity")
@@ -317,9 +400,18 @@ public class LifeLineController {
     ) {
         AuthenticatedUser user = currentUser();
         if (!user.isControl() && (user.role() != UserRole.HOSPITAL || !hospitalId.equals(user.hospitalId()))) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Hospitals can update only their assigned facility.");
+            throw forbidden(user, "hospital.capacity.update", "Hospital", hospitalId, "Hospitals can update only their assigned facility.");
         }
-        return store.updateHospitalCapacity(hospitalId, request.availableBeds());
+        Hospital hospital = store.updateHospitalCapacity(hospitalId, request.availableBeds());
+        auditService.allowed(
+                user,
+                "hospital.capacity.update",
+                "Hospital",
+                hospitalId,
+                "Hospital capacity updated.",
+                Map.of("availableBeds", request.availableBeds())
+        );
+        return hospital;
     }
 
     @PostMapping("/trips/{tripId}/reroute")
@@ -350,6 +442,15 @@ public class LifeLineController {
         Ambulance updatedAmbulance = ambulanceLocationProjection.applyTo(store.findAmbulance(ambulance.id()).orElseThrow());
         Hospital updatedHospital = store.findHospital(decision.hospital().id()).orElseThrow();
 
+        auditService.allowed(
+                user,
+                "trip.reroute",
+                "Trip",
+                updatedTrip.id(),
+                "Trip rerouted.",
+                Map.of("incidentId", incident.id(), "ambulanceId", updatedTrip.ambulanceId(), "hospitalId", updatedTrip.hospitalId())
+        );
+
         return new DispatchResponse(
                 incidentView(updatedIncident, user),
                 updatedAmbulance,
@@ -366,18 +467,26 @@ public class LifeLineController {
         requireControl(user, "Only control can reset demo data.");
         store.reset();
         ambulanceLocationProjection.clear();
+        auditService.allowed(
+                user,
+                "demo.reset",
+                "Demo",
+                "seed-data",
+                "Demo data reset.",
+                Map.of()
+        );
     }
 
     @ExceptionHandler(NoDispatchCandidateException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleNoCandidate(NoDispatchCandidateException exception) {
-        return new ErrorResponse(exception.getMessage());
+        return ErrorResponse.of(HttpStatus.CONFLICT, exception.getMessage());
     }
 
     @ExceptionHandler(IllegalStateException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleIllegalState(IllegalStateException exception) {
-        return new ErrorResponse(exception.getMessage());
+        return ErrorResponse.of(HttpStatus.CONFLICT, exception.getMessage());
     }
 
     private AuthenticatedUser currentUser() {
@@ -469,8 +578,19 @@ public class LifeLineController {
 
     private void requireControl(AuthenticatedUser user, String message) {
         if (!user.isControl()) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, message);
+            throw forbidden(user, "control.access", "Endpoint", "control-only", message);
         }
+    }
+
+    private ResponseStatusException forbidden(
+            AuthenticatedUser user,
+            String action,
+            String resourceType,
+            String resourceId,
+            String reason
+    ) {
+        auditService.denied(user, action, resourceType, resourceId, reason, Map.of());
+        return new ResponseStatusException(HttpStatus.FORBIDDEN, reason);
     }
 
     private NotificationRole notificationRole(AuthenticatedUser user) {
