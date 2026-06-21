@@ -24,34 +24,8 @@ LifeLine is intentionally role-specific. The four operational users should not s
 
 LifeLine uses a distributed service architecture with a practical migration path. The existing backend remains the operational source while V7 introduces deployable service boundaries and a gateway so the system can be split without rewriting product behavior.
 
-```text
-Browser
-  React + TypeScript role app
-    /patient
-    /driver
-    /hospital
-    /control
-    /simulation
-        |
-        v
-Gateway Service
-  Auth header forwarding
-  CORS boundary
-  Service discovery endpoint
-  API routing
-        |
-        +-------------------+-------------------+-------------------+
-        |                   |                   |                   |
-        v                   v                   v                   v
-Operations Service     Incident Service    Resource Service    Dispatch Service
-current Spring app     intake boundary      fleet/capacity      matching/routing
-        |                   |                   |                   |
-        +-------------------+-------------------+-------------------+
-                            |
-                            v
-                     Event and Data Plane
-        PostgreSQL/PostGIS  Redis  Kafka  Audit  Notifications  Simulations
-```
+<img width="1536" height="1024" alt="ChatGPT Image Jun 21, 2026, 10_37_56 PM" src="https://github.com/user-attachments/assets/79f5d249-b017-4d75-ba7b-5dfacfe12813" />
+
 
 ### Service Boundaries
 
