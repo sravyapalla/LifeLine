@@ -4,6 +4,7 @@ export type EmergencyCondition = 'CARDIAC' | 'TRAUMA' | 'PEDIATRIC' | 'STROKE' |
 export type IncidentPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type IncidentStatus = 'NEW' | 'ASSIGNED' | 'CANCELLED' | 'COMPLETED';
 export type TripStatus = 'RESERVED' | 'EN_ROUTE_PATIENT' | 'EN_ROUTE_HOSPITAL' | 'COMPLETED' | 'CANCELLED';
+export type NotificationRole = 'PATIENT' | 'DRIVER' | 'HOSPITAL' | 'CONTROL';
 
 export interface Location {
   latitude: number;
@@ -147,6 +148,18 @@ export interface OutboxPublishResponse {
   failed: number;
   pending: number;
   processedAt: string;
+}
+
+export interface Notification {
+  id: string;
+  role: NotificationRole;
+  title: string;
+  message: string;
+  eventId: string;
+  eventType: string;
+  createdAt: string;
+  acknowledgedAt: string | null;
+  unread: boolean;
 }
 
 export interface CreateIncidentPayload {

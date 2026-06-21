@@ -13,6 +13,8 @@ import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentPriority;
 import com.lifeline.domain.IncidentStatus;
 import com.lifeline.domain.Location;
+import com.lifeline.domain.Notification;
+import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
@@ -107,6 +109,16 @@ public class JdbcLifeLineStore implements LifeLineStore {
     }
 
     @Override
+    public List<Notification> notifications(NotificationRole role) {
+        return jdbc.query("""
+                SELECT id, role, title, message, event_id, event_type, created_at, acknowledged_at
+                FROM notifications
+                WHERE role = ?
+                ORDER BY created_at DESC
+                """, notificationMapper(), role.name());
+    }
+
+    @Override
     public List<OutboxEvent> pendingOutboxEvents(int limit) {
         return jdbc.query("""
                 SELECT id, aggregate_type, aggregate_id, event_type, payload, created_at, published_at,
@@ -155,6 +167,16 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 SELECT COUNT(*)
                 FROM outbox_events
                 WHERE published_at IS NULL
+                """, Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public int notificationBacklog() {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM notifications
+                WHERE acknowledged_at IS NULL
                 """, Integer.class);
         return count == null ? 0 : count;
     }
@@ -546,10 +568,46 @@ public class JdbcLifeLineStore implements LifeLineStore {
     }
 
     @Override
+    public Notification addNotification(Notification notification) {
+        jdbc.update("""
+                INSERT INTO notifications (id, role, title, message, event_id, event_type, created_at, acknowledged_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                notification.id(),
+                notification.role().name(),
+                notification.title(),
+                notification.message(),
+                notification.eventId(),
+                notification.eventType(),
+                Timestamp.from(notification.createdAt()),
+                notification.acknowledgedAt() == null ? null : Timestamp.from(notification.acknowledgedAt())
+        );
+        return notification;
+    }
+
+    @Override
+    public Notification acknowledgeNotification(String notificationId) {
+        Instant acknowledgedAt = Instant.now();
+        int updated = jdbc.update("""
+                UPDATE notifications
+                SET acknowledged_at = ?
+                WHERE id = ?
+                """, Timestamp.from(acknowledgedAt), notificationId);
+        if (updated == 0) {
+            throw new IllegalStateException("Notification not found.");
+        }
+        return queryOptional("""
+                SELECT id, role, title, message, event_id, event_type, created_at, acknowledged_at
+                FROM notifications
+                WHERE id = ?
+                """, notificationMapper(), notificationId).orElseThrow();
+    }
+
+    @Override
     @Transactional
     public void reset() {
         jdbc.execute("""
-                TRUNCATE TABLE dispatch_candidate_scores, dispatch_decisions, outbox_events,
+                TRUNCATE TABLE dispatch_candidate_scores, dispatch_decisions, outbox_events, notifications,
                                trips, incidents, hospital_specialties, hospitals, ambulances
                 RESTART IDENTITY
                 """);
@@ -812,6 +870,19 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 instant(rs, "last_publish_attempt_at"),
                 rs.getString("last_publish_error"),
                 instant(rs, "next_publish_attempt_at")
+        );
+    }
+
+    private RowMapper<Notification> notificationMapper() {
+        return (rs, rowNum) -> new Notification(
+                rs.getString("id"),
+                NotificationRole.valueOf(rs.getString("role")),
+                rs.getString("title"),
+                rs.getString("message"),
+                rs.getString("event_id"),
+                rs.getString("event_type"),
+                instant(rs, "created_at"),
+                instant(rs, "acknowledged_at")
         );
     }
 

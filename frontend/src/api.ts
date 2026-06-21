@@ -7,6 +7,7 @@ import type {
   Hospital,
   Incident,
   Metrics,
+  Notification,
   OutboxEvent,
   OutboxPublishResponse,
   OutboxSummary,
@@ -39,8 +40,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-export async function getDashboardData() {
-  const [ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics] = await Promise.all([
+export async function getDashboardData(role = 'control') {
+  const [ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications] = await Promise.all([
     request<Ambulance[]>('/ambulances'),
     request<AmbulanceLocationSnapshot[]>('/ambulance-locations'),
     request<Hospital[]>('/hospitals'),
@@ -49,10 +50,11 @@ export async function getDashboardData() {
     request<DispatchAuditRecord[]>('/dispatch-decisions'),
     request<OutboxEvent[]>('/outbox-events'),
     request<OutboxSummary>('/outbox-events/summary'),
-    request<Metrics>('/metrics')
+    request<Metrics>('/metrics'),
+    request<Notification[]>(`/notifications?role=${role}`)
   ]);
 
-  return { ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics };
+  return { ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications };
 }
 
 export function createIncident(payload: CreateIncidentPayload) {
@@ -105,5 +107,11 @@ export function updateAmbulanceLocation(ambulanceId: string, payload: UpdateAmbu
   return request<AmbulanceLocationSnapshot>(`/ambulances/${ambulanceId}/location`, {
     method: 'POST',
     body: JSON.stringify(payload)
+  });
+}
+
+export function acknowledgeNotification(notificationId: string) {
+  return request<Notification>(`/notifications/${notificationId}/ack`, {
+    method: 'POST'
   });
 }

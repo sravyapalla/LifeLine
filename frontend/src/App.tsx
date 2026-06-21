@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet';
 import {
+  acknowledgeNotification,
   createIncident,
   dispatchIncident,
   getDashboardData,
@@ -44,6 +45,7 @@ import type {
   Incident,
   IncidentPriority,
   Metrics,
+  Notification,
   OutboxEvent,
   OutboxPublishResponse,
   OutboxSummary,
@@ -63,6 +65,7 @@ interface DashboardState {
   outboxEvents: OutboxEvent[];
   outboxSummary: OutboxSummary;
   metrics: Metrics;
+  notifications: Notification[];
 }
 
 const initialIncident: CreateIncidentPayload = {
@@ -100,7 +103,7 @@ export default function App() {
 
   async function load() {
     setError('');
-    const nextData = await getDashboardData();
+    const nextData = await getDashboardData(role);
     setData(nextData);
     setCapacityDrafts(Object.fromEntries(nextData.hospitals.map((hospital) => [hospital.id, hospital.availableBeds])));
     setSelectedIncidentId((current) => {
@@ -117,7 +120,7 @@ export default function App() {
 
   useEffect(() => {
     load().catch((loadError: Error) => setError(loadError.message));
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     function syncPath() {
@@ -250,6 +253,19 @@ export default function App() {
     }
   }
 
+  async function handleAcknowledgeNotification(notificationId: string) {
+    setBusy(true);
+    setError('');
+    try {
+      await acknowledgeNotification(notificationId);
+      await load();
+    } catch (notificationError) {
+      setError((notificationError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleReset() {
     setBusy(true);
     setError('');
@@ -312,6 +328,13 @@ export default function App() {
         <MetricCard icon={<Bed size={18} />} label="Bed Avg" value={`${metrics?.averageBedAvailabilityPercent ?? 0}%`} tone="amber" />
         <MetricCard icon={<ClipboardList size={18} />} label="Pending Events" value={metrics?.pendingOutboxEvents ?? 0} tone="violet" />
       </section>
+
+      <NotificationPanel
+        notifications={data?.notifications ?? []}
+        role={role}
+        onAcknowledge={handleAcknowledgeNotification}
+        busy={busy}
+      />
 
       {role === 'patient' && (
         <PatientView
@@ -457,6 +480,50 @@ function PatientView({
           ))}
         </div>
       </aside>
+    </section>
+  );
+}
+
+function NotificationPanel({
+  notifications,
+  role,
+  onAcknowledge,
+  busy
+}: {
+  notifications: Notification[];
+  role: Role;
+  onAcknowledge: (notificationId: string) => void;
+  busy: boolean;
+}) {
+  const unread = notifications.filter((notification) => !notification.acknowledgedAt);
+
+  return (
+    <section className="notification-panel" aria-label={`${role} notifications`}>
+      <div className="notification-heading">
+        <span><BellPlus size={16} /></span>
+        <strong>{formatStatus(role)} Notifications</strong>
+        <em>{unread.length} unread</em>
+      </div>
+      <div className="notification-list">
+        {notifications.length === 0 && <div className="empty-state compact">No notifications</div>}
+        {notifications.slice(0, 4).map((notification) => (
+          <article className={`notification-item ${notification.acknowledgedAt ? 'read' : ''}`} key={notification.id}>
+            <div>
+              <strong>{notification.title}</strong>
+              <small>{notification.message}</small>
+              <small>{notification.eventType} - {formatRelativeTime(notification.createdAt)}</small>
+            </div>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => onAcknowledge(notification.id)}
+              disabled={busy || Boolean(notification.acknowledgedAt)}
+            >
+              Ack
+            </button>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }

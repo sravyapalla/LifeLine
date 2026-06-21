@@ -11,6 +11,8 @@ import com.lifeline.domain.Hospital;
 import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentStatus;
 import com.lifeline.domain.Location;
+import com.lifeline.domain.Notification;
+import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.outbox.OutboxProcessor;
@@ -18,6 +20,7 @@ import com.lifeline.outbox.OutboxPublishResult;
 import com.lifeline.outbox.OutboxSummary;
 import com.lifeline.outbox.OutboxSummaryService;
 import com.lifeline.location.AmbulanceLocationProjection;
+import com.lifeline.notifications.NotificationService;
 import com.lifeline.store.LifeLineStore;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -26,6 +29,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -44,19 +48,22 @@ public class LifeLineController {
     private final OutboxProcessor outboxProcessor;
     private final OutboxSummaryService outboxSummaryService;
     private final AmbulanceLocationProjection ambulanceLocationProjection;
+    private final NotificationService notificationService;
 
     public LifeLineController(
             LifeLineStore store,
             DispatchEngine dispatchEngine,
             OutboxProcessor outboxProcessor,
             OutboxSummaryService outboxSummaryService,
-            AmbulanceLocationProjection ambulanceLocationProjection
+            AmbulanceLocationProjection ambulanceLocationProjection,
+            NotificationService notificationService
     ) {
         this.store = store;
         this.dispatchEngine = dispatchEngine;
         this.outboxProcessor = outboxProcessor;
         this.outboxSummaryService = outboxSummaryService;
         this.ambulanceLocationProjection = ambulanceLocationProjection;
+        this.notificationService = notificationService;
     }
 
     @GetMapping("/ambulances")
@@ -97,6 +104,16 @@ public class LifeLineController {
     @GetMapping("/outbox-events/pending")
     public List<OutboxEvent> pendingOutboxEvents() {
         return store.pendingOutboxEvents(50);
+    }
+
+    @GetMapping("/notifications")
+    public List<Notification> notifications(@RequestParam String role) {
+        return notificationService.notificationsFor(parseRole(role));
+    }
+
+    @PostMapping("/notifications/{notificationId}/ack")
+    public Notification acknowledgeNotification(@PathVariable String notificationId) {
+        return notificationService.acknowledge(notificationId);
     }
 
     @GetMapping("/outbox-events/summary")
@@ -256,5 +273,13 @@ public class LifeLineController {
     @ResponseStatus(HttpStatus.CONFLICT)
     public ErrorResponse handleIllegalState(IllegalStateException exception) {
         return new ErrorResponse(exception.getMessage());
+    }
+
+    private NotificationRole parseRole(String role) {
+        try {
+            return NotificationRole.valueOf(role.toUpperCase());
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported notification role.");
+        }
     }
 }

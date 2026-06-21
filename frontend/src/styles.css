@@ -170,6 +170,81 @@ button {
   max-width: 1560px;
 }
 
+.notification-panel {
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  margin: 0 auto 18px;
+  max-width: 1560px;
+  padding: 12px;
+}
+
+.notification-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.notification-heading span {
+  background: #fee2e2;
+  border-radius: 8px;
+  color: #b91c1c;
+  display: grid;
+  height: 30px;
+  place-items: center;
+  width: 30px;
+}
+
+.notification-heading strong {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-heading em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.notification-list {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.notification-item {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 84px;
+  padding: 10px;
+}
+
+.notification-item.read {
+  opacity: 0.68;
+}
+
+.notification-item strong,
+.notification-item small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notification-item small {
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .metric-card,
 .panel,
 .map-card {
@@ -917,6 +992,10 @@ button {
   .hospital-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .notification-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 860px) {
@@ -925,6 +1004,7 @@ button {
   }
 
   .metrics-grid,
+  .notification-list,
   .patient-layout,
   .control-layout,
   .driver-layout,
