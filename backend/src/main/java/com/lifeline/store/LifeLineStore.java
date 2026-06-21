@@ -10,6 +10,7 @@ import com.lifeline.domain.IncidentPriority;
 import com.lifeline.domain.Location;
 import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
+import com.lifeline.domain.TripStatus;
 
 import java.util.List;
 import java.util.Optional;
@@ -33,6 +34,8 @@ public interface LifeLineStore {
 
     Optional<Hospital> findHospital(String id);
 
+    Optional<Trip> findTrip(String id);
+
     Incident createIncident(
             String patientName,
             String phone,
@@ -49,6 +52,16 @@ public interface LifeLineStore {
             List<CandidateScore> alternatives
     );
 
+    Trip updateTripStatus(String tripId, TripStatus status);
+
+    Hospital updateHospitalCapacity(String hospitalId, int availableBeds);
+
+    Trip rerouteTrip(
+            String tripId,
+            String hospitalId,
+            CandidateScore winningScore,
+            List<CandidateScore> alternatives
+    );
+
     void reset();
 }
-

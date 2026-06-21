@@ -18,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -125,6 +126,53 @@ public class LifeLineController {
                 updatedAmbulance,
                 updatedHospital,
                 trip,
+                decision.winningScore(),
+                decision.alternatives()
+        );
+    }
+
+    @PostMapping("/trips/{tripId}/status")
+    public Trip updateTripStatus(
+            @PathVariable String tripId,
+            @Valid @RequestBody UpdateTripStatusRequest request
+    ) {
+        return store.updateTripStatus(tripId, request.status());
+    }
+
+    @PostMapping("/hospitals/{hospitalId}/capacity")
+    public Hospital updateHospitalCapacity(
+            @PathVariable String hospitalId,
+            @Valid @RequestBody UpdateHospitalCapacityRequest request
+    ) {
+        return store.updateHospitalCapacity(hospitalId, request.availableBeds());
+    }
+
+    @PostMapping("/trips/{tripId}/reroute")
+    public DispatchResponse rerouteTrip(@PathVariable String tripId) {
+        Trip trip = store.findTrip(tripId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trip not found."));
+        Incident incident = store.findIncident(trip.incidentId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Incident not found."));
+        Ambulance ambulance = store.findAmbulance(trip.ambulanceId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Ambulance not found."));
+
+        DispatchDecision decision = dispatchEngine.rerouteHospital(incident, ambulance, trip.hospitalId(), store.hospitals());
+        Trip updatedTrip = store.rerouteTrip(
+                trip.id(),
+                decision.hospital().id(),
+                decision.winningScore(),
+                decision.alternatives()
+        );
+
+        Incident updatedIncident = store.findIncident(incident.id()).orElseThrow();
+        Ambulance updatedAmbulance = store.findAmbulance(ambulance.id()).orElseThrow();
+        Hospital updatedHospital = store.findHospital(decision.hospital().id()).orElseThrow();
+
+        return new DispatchResponse(
+                updatedIncident,
+                updatedAmbulance,
+                updatedHospital,
+                updatedTrip,
                 decision.winningScore(),
                 decision.alternatives()
         );

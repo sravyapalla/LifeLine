@@ -63,6 +63,36 @@ public class DispatchEngine {
         return new DispatchDecision(ambulance, hospital, winner, scores.stream().limit(8).toList());
     }
 
+    public DispatchDecision rerouteHospital(Incident incident, Ambulance ambulance, String currentHospitalId, List<Hospital> hospitals) {
+        AmbulanceType requiredType = requiredAmbulanceType(incident.condition(), incident.priority());
+        if (!ambulance.type().canHandle(requiredType)) {
+            throw new NoDispatchCandidateException("Assigned ambulance can no longer satisfy this incident.");
+        }
+
+        List<Hospital> eligibleHospitals = hospitals.stream()
+                .filter(hospital -> !hospital.id().equals(currentHospitalId))
+                .filter(Hospital::hasCapacity)
+                .filter(hospital -> hospital.canTreat(incident.condition()))
+                .toList();
+
+        List<CandidateScore> scores = eligibleHospitals.stream()
+                .map(hospital -> score(incident, ambulance, hospital, requiredType))
+                .sorted(Comparator.comparingDouble(CandidateScore::totalCost))
+                .toList();
+
+        if (scores.isEmpty()) {
+            throw new NoDispatchCandidateException("No alternate hospital is available for reroute.");
+        }
+
+        CandidateScore winner = scores.getFirst();
+        Hospital hospital = eligibleHospitals.stream()
+                .filter(candidate -> candidate.id().equals(winner.hospitalId()))
+                .findFirst()
+                .orElseThrow();
+
+        return new DispatchDecision(ambulance, hospital, winner, scores.stream().limit(8).toList());
+    }
+
     private CandidateScore score(Incident incident, Ambulance ambulance, Hospital hospital, AmbulanceType requiredType) {
         double pickupDistanceKm = distanceKm(ambulance.location(), incident.location());
         double hospitalDistanceKm = distanceKm(incident.location(), hospital.location());
@@ -129,4 +159,3 @@ public class DispatchEngine {
         return Math.round(value * 10.0) / 10.0;
     }
 }
-

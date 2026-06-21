@@ -1,11 +1,14 @@
 import type {
   Ambulance,
   CreateIncidentPayload,
+  DispatchAuditRecord,
   DispatchResponse,
   Hospital,
   Incident,
   Metrics,
-  Trip
+  OutboxEvent,
+  Trip,
+  TripStatus
 } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api';
@@ -33,15 +36,17 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function getDashboardData() {
-  const [ambulances, hospitals, incidents, trips, metrics] = await Promise.all([
+  const [ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, metrics] = await Promise.all([
     request<Ambulance[]>('/ambulances'),
     request<Hospital[]>('/hospitals'),
     request<Incident[]>('/incidents'),
     request<Trip[]>('/trips'),
+    request<DispatchAuditRecord[]>('/dispatch-decisions'),
+    request<OutboxEvent[]>('/outbox-events'),
     request<Metrics>('/metrics')
   ]);
 
-  return { ambulances, hospitals, incidents, trips, metrics };
+  return { ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, metrics };
 }
 
 export function createIncident(payload: CreateIncidentPayload) {
@@ -64,3 +69,22 @@ export function resetDemo() {
   });
 }
 
+export function updateTripStatus(tripId: string, status: TripStatus) {
+  return request<Trip>(`/trips/${tripId}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ status })
+  });
+}
+
+export function updateHospitalCapacity(hospitalId: string, availableBeds: number) {
+  return request<Hospital>(`/hospitals/${hospitalId}/capacity`, {
+    method: 'POST',
+    body: JSON.stringify({ availableBeds })
+  });
+}
+
+export function rerouteTrip(tripId: string) {
+  return request<DispatchResponse>(`/trips/${tripId}/reroute`, {
+    method: 'POST'
+  });
+}

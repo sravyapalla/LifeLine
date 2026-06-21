@@ -34,6 +34,8 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     private final Map<String, Hospital> hospitals = new LinkedHashMap<>();
     private final Map<String, Incident> incidents = new LinkedHashMap<>();
     private final Map<String, Trip> trips = new LinkedHashMap<>();
+    private final List<DispatchAuditRecord> dispatchDecisions = new ArrayList<>();
+    private final List<OutboxEvent> outboxEvents = new ArrayList<>();
 
     @PostConstruct
     public void seed() {
@@ -45,6 +47,8 @@ public class InMemoryLifeLineStore implements LifeLineStore {
         hospitals.clear();
         incidents.clear();
         trips.clear();
+        dispatchDecisions.clear();
+        outboxEvents.clear();
 
         addAmbulance(new Ambulance("AMB-101", "Aster Alpha", AmbulanceType.ALS, AmbulanceStatus.AVAILABLE, new Location(12.9719, 77.6412), "Indiranagar"));
         addAmbulance(new Ambulance("AMB-102", "Pulse Bravo", AmbulanceType.BLS, AmbulanceStatus.AVAILABLE, new Location(12.9352, 77.6245), "Koramangala"));
@@ -85,12 +89,12 @@ public class InMemoryLifeLineStore implements LifeLineStore {
 
     @Override
     public synchronized List<DispatchAuditRecord> dispatchDecisions() {
-        return List.of();
+        return new ArrayList<>(dispatchDecisions);
     }
 
     @Override
     public synchronized List<OutboxEvent> outboxEvents() {
-        return List.of();
+        return new ArrayList<>(outboxEvents);
     }
 
     @Override
@@ -108,6 +112,11 @@ public class InMemoryLifeLineStore implements LifeLineStore {
         return Optional.ofNullable(hospitals.get(id));
     }
 
+    @Override
+    public synchronized Optional<Trip> findTrip(String id) {
+        return Optional.ofNullable(trips.get(id));
+    }
+
     public synchronized Incident saveIncident(Incident incident) {
         incidents.put(incident.id(), incident);
         return incident;
@@ -122,8 +131,10 @@ public class InMemoryLifeLineStore implements LifeLineStore {
             Location location
     ) {
         String id = "INC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-        Incident incident = new Incident(id, patientName, phone, condition, priority, location, Instant.now(), IncidentStatus.NEW);
+        Instant now = Instant.now();
+        Incident incident = new Incident(id, patientName, phone, condition, priority, location, now, IncidentStatus.NEW);
         incidents.put(id, incident);
+        appendOutbox("Incident", id, "incident.created", "{\"incidentId\":\"%s\"}".formatted(id), now);
         return incident;
     }
 
@@ -168,7 +179,116 @@ public class InMemoryLifeLineStore implements LifeLineStore {
                 TripStatus.RESERVED
         );
         trips.put(trip.id(), trip);
+        dispatchDecisions.addFirst(new DispatchAuditRecord(
+                "DEC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
+                incidentId,
+                ambulanceId,
+                hospitalId,
+                score.pickupEtaMinutes(),
+                score.hospitalEtaMinutes(),
+                score.hospitalLoad(),
+                score.qualityPenalty(),
+                score.typePenalty(),
+                score.totalCost(),
+                score.explanation(),
+                trip.createdAt()
+        ));
+        appendOutbox("Dispatch", trip.id(), "dispatch.reserved", "{\"tripId\":\"%s\"}".formatted(trip.id()), trip.createdAt());
         return trip;
+    }
+
+    @Override
+    public synchronized Trip updateTripStatus(String tripId, TripStatus status) {
+        Trip trip = trips.get(tripId);
+        if (trip == null) {
+            throw new IllegalStateException("Trip not found.");
+        }
+
+        Trip updatedTrip = trip.withStatus(status);
+        trips.put(tripId, updatedTrip);
+
+        Ambulance ambulance = ambulances.get(trip.ambulanceId());
+        Incident incident = incidents.get(trip.incidentId());
+
+        if (ambulance != null) {
+            AmbulanceStatus nextAmbulanceStatus = switch (status) {
+                case RESERVED -> AmbulanceStatus.RESERVED;
+                case EN_ROUTE_PATIENT, EN_ROUTE_HOSPITAL -> AmbulanceStatus.ON_TRIP;
+                case COMPLETED, CANCELLED -> AmbulanceStatus.AVAILABLE;
+            };
+            ambulances.put(ambulance.id(), ambulance.withStatus(nextAmbulanceStatus));
+        }
+
+        if (incident != null && status == TripStatus.COMPLETED) {
+            incidents.put(incident.id(), incident.withStatus(IncidentStatus.COMPLETED));
+        } else if (incident != null && status == TripStatus.CANCELLED) {
+            incidents.put(incident.id(), incident.withStatus(IncidentStatus.CANCELLED));
+            releaseHospitalBed(trip.hospitalId());
+        }
+
+        appendOutbox("Trip", tripId, "trip.status_changed", "{\"tripId\":\"%s\",\"status\":\"%s\"}".formatted(tripId, status), Instant.now());
+        return updatedTrip;
+    }
+
+    @Override
+    public synchronized Hospital updateHospitalCapacity(String hospitalId, int availableBeds) {
+        Hospital hospital = hospitals.get(hospitalId);
+        if (hospital == null) {
+            throw new IllegalStateException("Hospital not found.");
+        }
+        if (availableBeds < 0 || availableBeds > hospital.totalBeds()) {
+            throw new IllegalStateException("Available beds must be between 0 and total beds.");
+        }
+
+        Hospital updatedHospital = hospital.withAvailableBeds(availableBeds);
+        hospitals.put(hospitalId, updatedHospital);
+        appendOutbox("Hospital", hospitalId, "hospital.capacity_changed", "{\"hospitalId\":\"%s\",\"availableBeds\":%d}".formatted(hospitalId, availableBeds), Instant.now());
+        return updatedHospital;
+    }
+
+    @Override
+    public synchronized Trip rerouteTrip(
+            String tripId,
+            String hospitalId,
+            CandidateScore winningScore,
+            List<CandidateScore> alternatives
+    ) {
+        Trip trip = trips.get(tripId);
+        Hospital hospital = hospitals.get(hospitalId);
+        Incident incident = trip == null ? null : incidents.get(trip.incidentId());
+
+        if (trip == null || hospital == null || incident == null) {
+            throw new IllegalStateException("Cannot reroute missing trip, hospital, or incident.");
+        }
+        if (trip.status() == TripStatus.COMPLETED || trip.status() == TripStatus.CANCELLED) {
+            throw new IllegalStateException("Completed or cancelled trips cannot be rerouted.");
+        }
+        if (!hospital.canTreat(incident.condition())) {
+            throw new IllegalStateException("Target hospital cannot treat this condition.");
+        }
+        if (!hospital.hasCapacity()) {
+            throw new IllegalStateException("Target hospital has no capacity.");
+        }
+
+        hospitals.put(hospitalId, hospital.reserveOneBed());
+        Trip updatedTrip = trip.withHospital(hospitalId, winningScore.hospitalEtaMinutes(), winningScore.totalCost());
+        trips.put(tripId, updatedTrip);
+        dispatchDecisions.addFirst(new DispatchAuditRecord(
+                "DEC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
+                trip.incidentId(),
+                trip.ambulanceId(),
+                hospitalId,
+                winningScore.pickupEtaMinutes(),
+                winningScore.hospitalEtaMinutes(),
+                winningScore.hospitalLoad(),
+                winningScore.qualityPenalty(),
+                winningScore.typePenalty(),
+                winningScore.totalCost(),
+                "Reroute: " + winningScore.explanation(),
+                Instant.now()
+        ));
+        appendOutbox("Trip", tripId, "trip.rerouted", "{\"tripId\":\"%s\",\"hospitalId\":\"%s\"}".formatted(tripId, hospitalId), Instant.now());
+        return updatedTrip;
     }
 
     private void addAmbulance(Ambulance ambulance) {
@@ -177,5 +297,24 @@ public class InMemoryLifeLineStore implements LifeLineStore {
 
     private void addHospital(Hospital hospital) {
         hospitals.put(hospital.id(), hospital);
+    }
+
+    private void releaseHospitalBed(String hospitalId) {
+        Hospital hospital = hospitals.get(hospitalId);
+        if (hospital != null) {
+            hospitals.put(hospitalId, hospital.withAvailableBeds(Math.min(hospital.availableBeds() + 1, hospital.totalBeds())));
+        }
+    }
+
+    private void appendOutbox(String aggregateType, String aggregateId, String eventType, String payload, Instant now) {
+        outboxEvents.addFirst(new OutboxEvent(
+                "EVT-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(),
+                aggregateType,
+                aggregateId,
+                eventType,
+                payload,
+                now,
+                null
+        ));
     }
 }

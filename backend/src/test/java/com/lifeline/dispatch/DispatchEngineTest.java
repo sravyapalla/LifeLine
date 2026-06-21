@@ -48,5 +48,41 @@ class DispatchEngineTest {
         assertThat(decision.ambulance().id()).isEqualTo("AMB-2");
         assertThat(decision.hospital().id()).isEqualTo("HOS-2");
     }
-}
 
+    @Test
+    void rerouteChoosesAlternateHospitalAndExcludesCurrentHospital() {
+        Incident incident = new Incident(
+                "INC-2",
+                "Patient",
+                "+91-90000-00000",
+                EmergencyCondition.TRAUMA,
+                IncidentPriority.HIGH,
+                new Location(12.95, 77.63),
+                Instant.now(),
+                IncidentStatus.ASSIGNED
+        );
+        Ambulance ambulance = new Ambulance(
+                "AMB-2",
+                "Advanced",
+                AmbulanceType.ALS,
+                AmbulanceStatus.ON_TRIP,
+                new Location(12.952, 77.632),
+                "Indiranagar"
+        );
+
+        DispatchDecision decision = engine.rerouteHospital(
+                incident,
+                ambulance,
+                "HOS-1",
+                List.of(
+                        new Hospital("HOS-1", "Current Hospital", new Location(12.955, 77.635), Set.of(EmergencyCondition.TRAUMA), 30, 12, 0.95),
+                        new Hospital("HOS-2", "Exhausted Hospital", new Location(12.956, 77.636), Set.of(EmergencyCondition.TRAUMA), 30, 0, 0.98),
+                        new Hospital("HOS-3", "Alternate Hospital", new Location(12.960, 77.640), Set.of(EmergencyCondition.TRAUMA), 30, 8, 0.9)
+                )
+        );
+
+        assertThat(decision.ambulance().id()).isEqualTo("AMB-2");
+        assertThat(decision.hospital().id()).isEqualTo("HOS-3");
+        assertThat(decision.alternatives()).extracting(CandidateScore::hospitalId).doesNotContain("HOS-1", "HOS-2");
+    }
+}
