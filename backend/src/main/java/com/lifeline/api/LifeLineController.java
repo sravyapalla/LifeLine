@@ -114,7 +114,8 @@ public class LifeLineController {
                 (int) hospitals.stream().filter(Hospital::hasCapacity).count(),
                 Math.round(averageBedAvailability * 1000.0) / 10.0,
                 (int) outboxEvents.stream().filter(event -> event.publishedAt() == null).count(),
-                (int) outboxEvents.stream().filter(event -> event.publishedAt() != null).count()
+                (int) outboxEvents.stream().filter(event -> event.publishedAt() != null).count(),
+                (int) outboxEvents.stream().filter(event -> event.publishedAt() == null && event.lastPublishError() != null).count()
         );
     }
 

@@ -28,6 +28,11 @@ class InMemoryLifeLineStoreTest {
 
         assertThat(published).isEqualTo(1);
         assertThat(store.pendingOutboxEventCount()).isZero();
-        assertThat(store.outboxEvents()).allSatisfy(event -> assertThat(event.publishedAt()).isNotNull());
+        assertThat(store.outboxEvents()).allSatisfy(event -> {
+            assertThat(event.publishedAt()).isNotNull();
+            assertThat(event.publishAttempts()).isEqualTo(1);
+            assertThat(event.lastPublishError()).isNull();
+            assertThat(event.nextPublishAttemptAt()).isNull();
+        });
     }
 }

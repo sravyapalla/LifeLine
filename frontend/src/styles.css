@@ -797,7 +797,8 @@ button {
   font-size: 11px;
   font-style: normal;
   font-weight: 900;
-  white-space: nowrap;
+  text-align: right;
+  white-space: normal;
 }
 
 .publish-note {

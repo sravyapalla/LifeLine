@@ -17,6 +17,14 @@ public class OutboxSummaryService {
     public OutboxSummary summarize(List<OutboxEvent> events, Instant now) {
         int pending = (int) events.stream().filter(event -> event.publishedAt() == null).count();
         int published = events.size() - pending;
+        int ready = (int) events.stream().filter(event -> event.isReadyForPublish(now)).count();
+        int failed = (int) events.stream()
+                .filter(event -> event.publishedAt() == null && event.lastPublishError() != null)
+                .count();
+        int retryScheduled = (int) events.stream()
+                .filter(event -> event.publishedAt() == null)
+                .filter(event -> event.nextPublishAttemptAt() != null && event.nextPublishAttemptAt().isAfter(now))
+                .count();
 
         OutboxEvent oldestPending = events.stream()
                 .filter(event -> event.publishedAt() == null)
@@ -45,6 +53,9 @@ public class OutboxSummaryService {
                 events.size(),
                 pending,
                 published,
+                ready,
+                failed,
+                retryScheduled,
                 oldestPending == null ? 0 : Math.max(0, Duration.between(oldestPending.createdAt(), now).toSeconds()),
                 oldestPending == null ? null : oldestPending.createdAt(),
                 lastPublishedAt,
@@ -54,10 +65,14 @@ public class OutboxSummaryService {
 
     private OutboxEventTypeSummary summarizeEventType(String eventType, List<OutboxEvent> events) {
         int pending = (int) events.stream().filter(event -> event.publishedAt() == null).count();
+        int failed = (int) events.stream()
+                .filter(event -> event.publishedAt() == null && event.lastPublishError() != null)
+                .count();
         return new OutboxEventTypeSummary(
                 eventType,
                 events.size(),
                 pending,
+                failed,
                 events.size() - pending
         );
     }

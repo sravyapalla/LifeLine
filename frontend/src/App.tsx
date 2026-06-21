@@ -887,6 +887,9 @@ function OutboxPanel({
   const totalEvents = summary?.totalEvents ?? pending + published;
   const oldestPending = summary?.oldestPendingAgeSeconds ? formatDuration(summary.oldestPendingAgeSeconds) : 'None';
   const lastPublished = summary?.lastPublishedAt ? formatDateTime(summary.lastPublishedAt) : 'None';
+  const readyEvents = summary?.readyEvents ?? pending;
+  const failedEvents = summary?.failedEvents ?? 0;
+  const retryScheduledEvents = summary?.retryScheduledEvents ?? 0;
   const eventTypes = summary?.eventTypes ?? [];
 
   return (
@@ -902,6 +905,9 @@ function OutboxPanel({
         <InfoLine label="Total" value={String(totalEvents)} />
         <InfoLine label="Pending" value={String(pending)} />
         <InfoLine label="Published" value={String(published)} />
+        <InfoLine label="Ready" value={String(readyEvents)} />
+        <InfoLine label="Failed" value={String(failedEvents)} />
+        <InfoLine label="Retry Waiting" value={String(retryScheduledEvents)} />
         <InfoLine label="Oldest Pending" value={oldestPending} />
         <InfoLine label="Last Published" value={lastPublished} />
       </div>
@@ -910,17 +916,17 @@ function OutboxPanel({
           {eventTypes.slice(0, 5).map((eventType) => (
             <div className="event-type-row" key={eventType.eventType}>
               <span>{eventType.eventType}</span>
-              <em>{eventType.pending} pending / {eventType.published} published</em>
+              <em>{eventType.pending} pending / {eventType.failed} failed / {eventType.published} published</em>
             </div>
           ))}
         </div>
       )}
-      <button className="ghost-button full-width" type="button" onClick={onPublish} disabled={busy || pending === 0}>
+      <button className="ghost-button full-width" type="button" onClick={onPublish} disabled={busy || readyEvents === 0}>
         Publish Pending
       </button>
       {lastPublish && (
         <small className="publish-note">
-          Published {lastPublish.published}; {lastPublish.pending} pending
+          Published {lastPublish.published}; failed {lastPublish.failed}; {lastPublish.pending} pending
         </small>
       )}
     </div>
@@ -932,7 +938,7 @@ function Timeline({ events, decisions }: { events: OutboxEvent[]; decisions: Dis
     ...events.map((event) => ({
       id: event.id,
       type: event.eventType,
-      subject: `${event.aggregateType} ${event.aggregateId} - ${event.publishedAt ? 'published' : 'pending'}`,
+      subject: `${event.aggregateType} ${event.aggregateId} - ${outboxDeliveryState(event)}`,
       at: event.createdAt
     })),
     ...decisions.map((decision) => ({
@@ -1097,6 +1103,13 @@ function rolePath(role: Role) {
 
 function formatStatus(value: string) {
   return value.toLowerCase().split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function outboxDeliveryState(event: OutboxEvent) {
+  if (event.publishedAt) return 'published';
+  if (event.lastPublishError) return 'failed, retry scheduled';
+  if (event.nextPublishAttemptAt && new Date(event.nextPublishAttemptAt).getTime() > Date.now()) return 'retry waiting';
+  return 'pending';
 }
 
 function formatDuration(seconds: number) {
