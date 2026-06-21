@@ -12,6 +12,8 @@ import com.lifeline.domain.IncidentStatus;
 import com.lifeline.domain.Location;
 import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
+import com.lifeline.outbox.OutboxProcessor;
+import com.lifeline.outbox.OutboxPublishResult;
 import com.lifeline.store.LifeLineStore;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -34,10 +36,12 @@ import java.util.List;
 public class LifeLineController {
     private final LifeLineStore store;
     private final DispatchEngine dispatchEngine;
+    private final OutboxProcessor outboxProcessor;
 
-    public LifeLineController(LifeLineStore store, DispatchEngine dispatchEngine) {
+    public LifeLineController(LifeLineStore store, DispatchEngine dispatchEngine, OutboxProcessor outboxProcessor) {
         this.store = store;
         this.dispatchEngine = dispatchEngine;
+        this.outboxProcessor = outboxProcessor;
     }
 
     @GetMapping("/ambulances")
@@ -70,6 +74,11 @@ public class LifeLineController {
         return store.outboxEvents();
     }
 
+    @GetMapping("/outbox-events/pending")
+    public List<OutboxEvent> pendingOutboxEvents() {
+        return store.pendingOutboxEvents(50);
+    }
+
     @GetMapping("/metrics")
     public MetricsResponse metrics() {
         List<Incident> incidents = store.incidents();
@@ -81,14 +90,22 @@ public class LifeLineController {
                 .mapToDouble(hospital -> hospital.totalBeds() == 0 ? 0 : (double) hospital.availableBeds() / hospital.totalBeds())
                 .average()
                 .orElse(0);
+        List<OutboxEvent> outboxEvents = store.outboxEvents();
 
         return new MetricsResponse(
                 (int) incidents.stream().filter(incident -> incident.status() == IncidentStatus.NEW).count(),
                 (int) ambulances.stream().filter(ambulance -> ambulance.status() == AmbulanceStatus.AVAILABLE).count(),
                 trips.size(),
                 (int) hospitals.stream().filter(Hospital::hasCapacity).count(),
-                Math.round(averageBedAvailability * 1000.0) / 10.0
+                Math.round(averageBedAvailability * 1000.0) / 10.0,
+                (int) outboxEvents.stream().filter(event -> event.publishedAt() == null).count(),
+                (int) outboxEvents.stream().filter(event -> event.publishedAt() != null).count()
         );
+    }
+
+    @PostMapping("/outbox-events/publish")
+    public OutboxPublishResult publishOutboxEvents() {
+        return outboxProcessor.publishPendingNow();
     }
 
     @PostMapping("/incidents")

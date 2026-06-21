@@ -165,7 +165,7 @@ button {
 .metrics-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin: 0 auto 18px;
   max-width: 1560px;
 }
@@ -223,6 +223,11 @@ button {
   color: #b45309;
 }
 
+.metric-card.violet > span {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
 .role-layout {
   display: grid;
   gap: 18px;
@@ -259,6 +264,10 @@ button {
 .panel-heading {
   justify-content: space-between;
   margin-bottom: 14px;
+}
+
+.compact-heading {
+  margin-bottom: 8px;
 }
 
 .count,
@@ -743,6 +752,24 @@ button {
 
 .timeline {
   margin-top: 16px;
+}
+
+.outbox-panel {
+  border-bottom: 1px solid #e2e8f0;
+  border-top: 1px solid #e2e8f0;
+  margin-top: 16px;
+  padding: 14px 0 16px;
+}
+
+.outbox-stats {
+  margin-bottom: 10px;
+}
+
+.publish-note {
+  color: #64748b;
+  display: block;
+  font-weight: 800;
+  margin-top: 8px;
 }
 
 .timeline-row {

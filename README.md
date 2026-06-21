@@ -10,7 +10,8 @@ The product direction is intentionally pragmatic: build a correct, explainable d
 | --- | --- | --- |
 | V1 | Implemented | End-to-end dispatch prototype with seeded Bengaluru data, in-memory state, REST APIs, and React dashboard |
 | V2 | Implemented | Durable dispatch foundation with PostgreSQL/PostGIS schema, row-locked reservations, decision audit, outbox records, and candidate explanations |
-| V3 | Implemented in this branch | Multi-actor workflow with patient, driver, hospital, and control tower role surfaces plus rerouting actions |
+| V3 | Implemented | Multi-actor workflow with patient, driver, hospital, and control tower role surfaces plus rerouting actions |
+| V4 | Implemented in this branch | Event-driven reliability foundation with processable outbox events, publish metrics, and control tower visibility |
 
 ## V1 Implemented Scope
 
@@ -45,6 +46,17 @@ The product direction is intentionally pragmatic: build a correct, explainable d
 - Reroute scoring that excludes the current hospital and exhausted hospitals while reusing the dispatch engine's explainable ranking model
 - Outbox events for trip status changes, hospital capacity changes, and reroutes
 - Frontend timeline combining outbox events and dispatch audit records
+
+## V4 Implemented Scope
+
+- Store-level pending outbox query and publish operations
+- PostgreSQL publish batching using row locks and `SKIP LOCKED`
+- Memory profile parity for local outbox publish demos
+- Manual backend endpoint to publish pending outbox events
+- Optional scheduled outbox publishing behind configuration
+- Metrics for pending and published outbox events
+- Control Tower outbox reliability panel with manual publish action
+- Timeline visibility for pending versus published event state
 
 ## V2 Product Goal
 
@@ -183,6 +195,57 @@ data/
 7. Backend scores alternate hospitals, reserves the new hospital, updates the trip, and writes an outbox event
 ```
 
+## V4 Product Goal
+
+V4 begins turning the outbox from an audit table into a reliability mechanism.
+
+The V4 part 1 goal is not to add Kafka yet. The goal is to prove the event lifecycle inside the modular monolith:
+
+1. Workflow actions write durable outbox events in the same transaction as state changes.
+2. Operators can see which events are still pending.
+3. A processor can claim and publish a bounded batch safely.
+4. Published events are marked with `published_at`.
+5. The Control Tower exposes event health as an operational signal.
+
+## V4 Target Architecture
+
+```text
+backend/
+  outbox
+    OutboxProcessor
+      manual publish endpoint
+      optional scheduled polling
+      bounded batch size
+
+  store
+    pending event query
+    publish pending events
+    PostgreSQL row locking with SKIP LOCKED
+
+data/
+  outbox_events
+    payload
+    created_at
+    published_at
+
+frontend/
+  control tower
+    pending/published metrics
+    manual publish action
+    event timeline state
+```
+
+## V4 Outbox Flow
+
+```text
+1. Patient, dispatch, driver, hospital, or reroute action changes backend state
+2. Backend writes the matching outbox event in the same transaction
+3. Event remains pending while published_at is null
+4. Manual publish endpoint or optional scheduled processor claims a batch
+5. Processor marks each claimed event as published
+6. Control Tower refreshes pending and published counts
+```
+
 ## Design Decisions
 
 | ID | Decision | Why |
@@ -207,6 +270,9 @@ data/
 | D18 | Reroute active trips through the dispatch engine | Alternate hospital selection must stay explainable and testable rather than becoming a special-case UI shortcut. |
 | D19 | Treat hospital capacity updates as authoritative | Hospital UI is the source for live receiving availability; reroute logic must react to exhausted capacity. |
 | D20 | Keep eventing local through the outbox in V3 | The product should prove event contracts and timeline behavior before introducing Kafka or another broker. |
+| D21 | Process the transactional outbox before adding Kafka | Reliable local event lifecycle should be proven before adding broker operations and deployment complexity. |
+| D22 | Keep automatic outbox publishing disabled by default | Local demos should be deterministic; teams can enable scheduled publishing with configuration when they are ready. |
+| D23 | Use `SKIP LOCKED` for PostgreSQL outbox batches | Future workers should be able to claim pending events concurrently without double-publishing the same row. |
 
 ## V2 Data Ownership
 
@@ -239,7 +305,7 @@ The reservation operation should be idempotent using a request key or incident-l
 
 ## API Surface
 
-Current V1 APIs:
+Current APIs:
 
 - `GET /api/ambulances`
 - `GET /api/hospitals`
@@ -249,13 +315,15 @@ Current V1 APIs:
 - `GET /api/trips`
 - `GET /api/dispatch-decisions`
 - `GET /api/outbox-events`
+- `GET /api/outbox-events/pending`
+- `POST /api/outbox-events/publish`
 - `GET /api/metrics`
 - `POST /api/demo/reset`
 - `POST /api/trips/{tripId}/status`
 - `POST /api/hospitals/{hospitalId}/capacity`
 - `POST /api/trips/{tripId}/reroute`
 
-V2 keeps the original APIs stable where possible, while V3 adds role workflow actions for trips, hospital capacity, and rerouting.
+V2 keeps the original APIs stable where possible, V3 adds role workflow actions for trips, hospital capacity, and rerouting, and V4 adds outbox processing operations.
 
 ## Prerequisites
 
@@ -291,7 +359,7 @@ To run the fallback in-memory profile instead of PostgreSQL:
 
 ```powershell
 cd backend
-mvn spring-boot:run -Dspring-boot.run.profiles=memory
+mvn.cmd spring-boot:run "-Dspring-boot.run.profiles=memory"
 ```
 
 ## Run Frontend

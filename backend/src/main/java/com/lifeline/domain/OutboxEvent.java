@@ -11,5 +11,7 @@ public record OutboxEvent(
         Instant createdAt,
         Instant publishedAt
 ) {
+    public OutboxEvent publishedAt(Instant publishedAt) {
+        return new OutboxEvent(id, aggregateType, aggregateId, eventType, payload, createdAt, publishedAt);
+    }
 }
-

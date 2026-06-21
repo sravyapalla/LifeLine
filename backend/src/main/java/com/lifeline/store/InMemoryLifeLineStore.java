@@ -98,6 +98,21 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     }
 
     @Override
+    public synchronized List<OutboxEvent> pendingOutboxEvents(int limit) {
+        return outboxEvents.stream()
+                .filter(event -> event.publishedAt() == null)
+                .limit(limit)
+                .toList();
+    }
+
+    @Override
+    public synchronized int pendingOutboxEventCount() {
+        return (int) outboxEvents.stream()
+                .filter(event -> event.publishedAt() == null)
+                .count();
+    }
+
+    @Override
     public synchronized Optional<Incident> findIncident(String id) {
         return Optional.ofNullable(incidents.get(id));
     }
@@ -289,6 +304,20 @@ public class InMemoryLifeLineStore implements LifeLineStore {
         ));
         appendOutbox("Trip", tripId, "trip.rerouted", "{\"tripId\":\"%s\",\"hospitalId\":\"%s\"}".formatted(tripId, hospitalId), Instant.now());
         return updatedTrip;
+    }
+
+    @Override
+    public synchronized int publishPendingOutboxEvents(int limit) {
+        int published = 0;
+        Instant now = Instant.now();
+        for (int index = 0; index < outboxEvents.size() && published < limit; index += 1) {
+            OutboxEvent event = outboxEvents.get(index);
+            if (event.publishedAt() == null) {
+                outboxEvents.set(index, event.publishedAt(now));
+                published += 1;
+            }
+        }
+        return published;
     }
 
     private void addAmbulance(Ambulance ambulance) {

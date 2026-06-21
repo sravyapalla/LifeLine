@@ -28,6 +28,10 @@ public interface LifeLineStore {
 
     List<OutboxEvent> outboxEvents();
 
+    List<OutboxEvent> pendingOutboxEvents(int limit);
+
+    int pendingOutboxEventCount();
+
     Optional<Incident> findIncident(String id);
 
     Optional<Ambulance> findAmbulance(String id);
@@ -62,6 +66,8 @@ public interface LifeLineStore {
             CandidateScore winningScore,
             List<CandidateScore> alternatives
     );
+
+    int publishPendingOutboxEvents(int limit);
 
     void reset();
 }

@@ -5,7 +5,8 @@ public record MetricsResponse(
         int availableAmbulances,
         int activeTrips,
         int hospitalsWithCapacity,
-        double averageBedAvailabilityPercent
+        double averageBedAvailabilityPercent,
+        int pendingOutboxEvents,
+        int publishedOutboxEvents
 ) {
 }
-

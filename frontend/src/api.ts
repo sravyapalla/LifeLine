@@ -7,6 +7,7 @@ import type {
   Incident,
   Metrics,
   OutboxEvent,
+  OutboxPublishResponse,
   Trip,
   TripStatus
 } from './types';
@@ -85,6 +86,12 @@ export function updateHospitalCapacity(hospitalId: string, availableBeds: number
 
 export function rerouteTrip(tripId: string) {
   return request<DispatchResponse>(`/trips/${tripId}/reroute`, {
+    method: 'POST'
+  });
+}
+
+export function publishOutboxEvents() {
+  return request<OutboxPublishResponse>('/outbox-events/publish', {
     method: 'POST'
   });
 }

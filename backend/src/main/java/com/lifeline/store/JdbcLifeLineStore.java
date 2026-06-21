@@ -106,6 +106,27 @@ public class JdbcLifeLineStore implements LifeLineStore {
     }
 
     @Override
+    public List<OutboxEvent> pendingOutboxEvents(int limit) {
+        return jdbc.query("""
+                SELECT id, aggregate_type, aggregate_id, event_type, payload, created_at, published_at
+                FROM outbox_events
+                WHERE published_at IS NULL
+                ORDER BY created_at
+                LIMIT ?
+                """, outboxEventMapper(), limit);
+    }
+
+    @Override
+    public int pendingOutboxEventCount() {
+        Integer count = jdbc.queryForObject("""
+                SELECT COUNT(*)
+                FROM outbox_events
+                WHERE published_at IS NULL
+                """, Integer.class);
+        return count == null ? 0 : count;
+    }
+
+    @Override
     public Optional<Incident> findIncident(String id) {
         return queryOptional("""
                 SELECT id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
@@ -456,6 +477,33 @@ public class JdbcLifeLineStore implements LifeLineStore {
         ), now);
 
         return findTrip(tripId).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public int publishPendingOutboxEvents(int limit) {
+        List<String> eventIds = jdbc.query("""
+                SELECT id
+                FROM outbox_events
+                WHERE published_at IS NULL
+                ORDER BY created_at
+                LIMIT ?
+                FOR UPDATE SKIP LOCKED
+                """,
+                (rs, rowNum) -> rs.getString("id"),
+                limit
+        );
+
+        Instant now = Instant.now();
+        int published = 0;
+        for (String eventId : eventIds) {
+            published += jdbc.update("""
+                    UPDATE outbox_events
+                    SET published_at = ?
+                    WHERE id = ? AND published_at IS NULL
+                    """, Timestamp.from(now), eventId);
+        }
+        return published;
     }
 
     @Override

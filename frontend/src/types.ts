@@ -79,6 +79,8 @@ export interface Metrics {
   activeTrips: number;
   hospitalsWithCapacity: number;
   averageBedAvailabilityPercent: number;
+  pendingOutboxEvents: number;
+  publishedOutboxEvents: number;
 }
 
 export interface DispatchAuditRecord {
@@ -104,6 +106,12 @@ export interface OutboxEvent {
   payload: string;
   createdAt: string;
   publishedAt: string | null;
+}
+
+export interface OutboxPublishResponse {
+  published: number;
+  pending: number;
+  processedAt: string;
 }
 
 export interface CreateIncidentPayload {
