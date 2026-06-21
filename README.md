@@ -1,437 +1,147 @@
 # LifeLine
 
-LifeLine is an emergency dispatch product prototype for matching an incident to the right ambulance and hospital in one decision.
+LifeLine is a production-shaped emergency response platform that coordinates patients, ambulances, hospitals, and operations teams during time-critical incidents.
 
-The product direction is intentionally pragmatic: build a correct, explainable dispatch workflow first, then evolve toward durable data, live tracking, eventing, optimization, and eventually service boundaries.
+The product has two jobs:
 
-## Current Version Status
+1. Help a patient request emergency help and track the response.
+2. Help operations choose the safest ambulance and receiving hospital using live resource state, auditable decisions, and explainable optimization.
 
-| Version | Status | Purpose |
+The current implementation is a working full-stack system with authenticated role experiences, dispatch and reroute workflows, Redis live ambulance locations, Kafka-backed outbox publishing, notifications, audit events, and a simulation workspace for surge planning.
+
+## Product Surfaces
+
+LifeLine is intentionally role-specific. The four operational users should not see the same dashboard with tabs hidden by CSS. Each role has a different job, different risk profile, and different data visibility.
+
+| Role | Primary Questions | Product Surface |
 | --- | --- | --- |
-| V1 | Implemented | End-to-end dispatch prototype with seeded Bengaluru data, in-memory state, REST APIs, and React dashboard |
-| V2 | Implemented | Durable dispatch foundation with PostgreSQL/PostGIS schema, row-locked reservations, decision audit, outbox records, and candidate explanations |
-| V3 | Implemented | Multi-actor workflow with patient, driver, hospital, and control tower role surfaces plus rerouting actions |
-| V4 | Implemented | Event-driven reliability foundation with processable outbox events, health summaries, publish metrics, and control tower visibility |
-| V5 | Implemented | Ops Simulator with required Docker runtime, Kafka event streaming, Redis live locations, notifications, routing abstraction, and optimization comparisons |
-| V6 | Implemented in this branch | Production Trust release with local JWT auth, backend RBAC, least-privilege PII responses, security audit trail, hardened API boundaries, and authenticated role UI |
+| Patient | Can I request help, see available coverage, and track my ambulance? | Intake, availability snapshot, request timeline, trip tracking |
+| Driver | What patient request am I assigned to, where do I go, and which hospital is ready? | Assignment queue, route state, hospital receiving options, trip status actions |
+| Hospital | What is incoming, what capacity do we have, and when should we declare exhaustion? | Incoming ambulance board, capacity controls, clinical load indicators |
+| Control | What is happening across the city and what needs intervention? | Incident queue, dispatch, reroute, live map, reliability, audit, simulation |
 
-## V1 Implemented Scope
+## System Architecture
 
-- Java Spring Boot backend
-- React + TypeScript dashboard
-- Seeded Bengaluru ambulances, hospitals, and incidents
-- Weighted dispatch scoring for patient, ambulance, and hospital matching
-- REST APIs for incidents, ambulances, hospitals, trips, and metrics
-- In-memory store for fastest V1 iteration
-- Docker Compose placeholders for PostGIS and Redis
-
-## V2 Implemented Scope
-
-- PostgreSQL/PostGIS-backed operational schema managed by Flyway
-- JDBC-backed `LifeLineStore` as the default backend store
-- `memory` profile for the original in-memory V1-style local fallback
-- Strong reservation commit checks using row locks for incident, ambulance, and hospital state
-- Dispatch decision audit table with winning score details
-- Candidate score persistence for top dispatch alternatives
-- Outbox table and event creation for incident and dispatch lifecycle events
-- New read APIs for dispatch decisions and outbox events
-- Dashboard display of top dispatch candidates after assignment
-
-## V3 Implemented Scope
-
-- Single React application with role-based surfaces for patient, ambulance driver, hospital, and control tower workflows
-- Patient request flow that creates incidents and shows the care journey after dispatch
-- Driver workflow for moving trips through pickup, transfer, and arrival states
-- Hospital workflow for updating available capacity and marking a hospital exhausted
-- Control tower workflow for dispatching incidents, viewing the route map, inspecting events, and triggering reroutes
-- Backend APIs for trip status transitions, hospital capacity updates, and rerouting active trips
-- Reroute scoring that excludes the current hospital and exhausted hospitals while reusing the dispatch engine's explainable ranking model
-- Outbox events for trip status changes, hospital capacity changes, and reroutes
-- Frontend timeline combining outbox events and dispatch audit records
-
-## V4 Implemented Scope
-
-- Store-level pending outbox query and publish operations
-- PostgreSQL publish batching using row locks and `SKIP LOCKED`
-- Memory profile parity for local outbox publish demos
-- Manual backend endpoint to publish pending outbox events
-- Optional scheduled outbox publishing behind configuration
-- Metrics for pending and published outbox events
-- Event health summary with backlog age and event-type counts
-- Retry state with publish attempts, last failure reason, and next retry time
-- Configurable publisher abstraction to separate event delivery from outbox state management
-- Failure-demo publisher mode for exercising retry behavior locally
-- Opt-in PostgreSQL/Testcontainers integration test for JDBC outbox retry state
-- Control Tower outbox reliability panel with manual publish action
-- Timeline visibility for pending versus published event state
-
-## V5 Implemented Scope
-
-- Required Docker runtime for PostgreSQL/PostGIS, Redis, and Kafka
-- Routing provider boundary with deterministic straight-line ETA provider
-- Redis-backed live ambulance location projection used by dispatch and maps
-- Kafka outbox publisher mode using the V4 retry/failure lifecycle
-- Role-targeted notification center generated from workflow events
-- Simulation run APIs and durable simulation history
-- Greedy sequential versus global min-cost optimization comparison
-- New `/simulation` route for scenario design, comparison, and playback
-- Expanded operational metrics for simulations, live locations, notifications, and Kafka failures
-
-## V6 Implemented Scope
-
-- Stateless local JWT authentication with seeded demo users
-- Backend-enforced RBAC for patient, driver, hospital, and control roles
-- Incident ownership through `requester_user_id`
-- Role-aware incident responses with masked patient PII for driver and hospital users
-- Control-only security audit trail for login, denied access, dispatch, trip status, hospital capacity, reroute, outbox publish, simulation, notification ack, and demo reset events
-- Configurable CORS allowed origins with `http://localhost:5173` as the local default
-- Consistent JSON error responses for API and security failures
-- Authenticated React login/logout flow with route gating and signed-in user badge
-- Control Tower audit visibility alongside outbox and workflow timeline
-
-## V2 Product Goal
-
-V2 moves LifeLine from a demo-only prototype toward a durable, production-shaped system.
-
-The V2 goal is not to split into microservices yet. The V2 goal is to make the core workflow correct:
-
-1. Persist incidents, ambulances, hospitals, reservations, trips, and decision audit records.
-2. Use geospatial data deliberately instead of hard-coded in-memory filtering.
-3. Separate dispatch decisions from resource reservations.
-4. Record why every assignment was made.
-5. Prepare reliable event publishing without adding Kafka too early.
-6. Keep the system easy to run locally and easy to explain in a PR/interview.
-
-## V2 Target Architecture
+LifeLine uses a distributed service architecture with a practical migration path. The existing backend remains the operational source while V7 introduces deployable service boundaries and a gateway so the system can be split without rewriting product behavior.
 
 ```text
-frontend/
-  React + TypeScript dispatch console
-  Map view, incident queue, dispatch panel, resource state
-
-backend/
-  Java 21 + Spring Boot modular monolith
-
-  modules:
-    api
-      REST boundary and request validation
-
-    intake
-      incident creation, triage inputs, incident lifecycle
-
-    dispatch
-      candidate search, scoring, decision explanation
-
-    ambulance-registry
-      ambulance capability, availability, location, reservation state
-
-    hospital-capacity
-      hospital specialty, bed availability, bed reservation state
-
-    trip-tracking
-      trip lifecycle, active assignments, tracking-ready model
-
-    audit
-      decision snapshots, outbox records, replay-friendly event log
-
-data/
-  PostgreSQL + PostGIS
-    source of truth for durable operational data
-
-  Redis
-    live ambulance locations, short-lived locks, fast availability projections
-
-integration/
-  OSRM or GraphHopper
-    route ETA provider behind an internal interface
-
-  Transactional outbox
-    reliable event handoff before introducing Kafka or Redpanda
-```
-
-## V2 Request Flow
-
-```text
-1. Dispatcher creates incident
-2. Backend validates triage fields and stores incident
-3. Dispatch module searches compatible ambulances and hospitals
-4. Routing provider estimates pickup and transfer ETA
-5. Dispatch module scores candidates and records explanation
-6. Reservation workflow reserves ambulance and hospital bed in one transaction boundary
-7. Trip is created
-8. Audit record and outbox event are written
-9. Dashboard refreshes resource and trip state
-```
-
-## V3 Product Goal
-
-V3 turns LifeLine from a single dispatch console into a multi-actor emergency coordination workflow.
-
-The V3 goal is to show how the same backend state is experienced by different users:
-
-1. A patient raises the emergency request and sees progress.
-2. A driver receives the assigned trip and advances the trip lifecycle.
-3. A hospital manages live receiving capacity.
-4. A control tower observes the full system, dispatches incidents, and reroutes active trips when capacity changes.
-
-## V3 Target Architecture
-
-```text
-frontend/
-  React + TypeScript single app
-
-  role routes:
-    /patient
-      incident intake and patient-facing journey state
-
-    /driver
-      assigned trips and trip status transitions
-
-    /hospital
-      hospital capacity controls and incoming trip list
-
-    /control
-      system map, incident queue, trip selection, decisions, timeline
-
-backend/
-  Java 21 + Spring Boot modular monolith
-
-  api
-    role workflow endpoints
-
-  dispatch
-    initial assignment and alternate-hospital reroute decisions
-
-  store
-    PostgreSQL-backed authoritative state changes
-    memory profile parity for local demos
-
-data/
-  PostgreSQL/PostGIS
-    source of truth for incidents, hospitals, ambulances, trips, audit, outbox
-
-  outbox_events
-    local event log for workflow visibility before adding a broker
-```
-
-## V3 Workflow
-
-```text
-1. Patient creates an incident
-2. Control tower runs dispatch
-3. Backend reserves ambulance and hospital capacity
-4. Driver moves trip from reserved to pickup to hospital transfer
-5. Hospital updates capacity as receiving conditions change
-6. If the matched hospital becomes exhausted, control tower reroutes the active trip
-7. Backend scores alternate hospitals, reserves the new hospital, updates the trip, and writes an outbox event
-```
-
-## V4 Product Goal
-
-V4 begins turning the outbox from an audit table into a reliability mechanism.
-
-The V4 goal is not to add Kafka yet. The goal is to prove the event lifecycle inside the modular monolith:
-
-1. Workflow actions write durable outbox events in the same transaction as state changes.
-2. Operators can see which events are still pending.
-3. A processor can claim and publish a bounded batch safely.
-4. Published events are marked with `published_at`.
-5. The Control Tower exposes event health as an operational signal.
-6. Event health includes backlog age and event-type distribution, not just raw event rows.
-7. Failed delivery attempts are retained with retry state instead of being hidden in logs.
-
-## V4 Target Architecture
-
-```text
-backend/
-  outbox
-    OutboxProcessor
-      manual publish endpoint
-      optional scheduled polling
-      bounded batch size
-      retry delay
-
-    OutboxSummaryService
-      pending and published counts
-      ready, failed, and retry-scheduled counts
-      oldest pending backlog age
-      event-type breakdown
-
-    OutboxPublisher
-      configurable logging/failure demo publisher
-      future notification or broker adapter boundary
-
-  store
-    pending event query
-    claim ready events
-    mark publish success or failure
-    PostgreSQL row locking with SKIP LOCKED
-
-data/
-  outbox_events
-    payload
-    created_at
-    published_at
-    publish_attempts
-    last_publish_error
-    next_publish_attempt_at
-
-frontend/
-  control tower
-    pending/published metrics
-    manual publish action
-    backlog health summary
-    event timeline state
-```
-
-## V4 Outbox Flow
-
-```text
-1. Patient, dispatch, driver, hospital, or reroute action changes backend state
-2. Backend writes the matching outbox event in the same transaction
-3. Event remains pending while published_at is null
-4. Manual publish endpoint or optional scheduled processor claims a batch
-5. Processor sends each claimed event through the publisher adapter
-6. Successful events are marked with `published_at`
-7. Failed events retain `last_publish_error` and wait until `next_publish_attempt_at`
-8. Summary endpoint reports backlog age, last publish time, retry state, and event-type distribution
-9. Control Tower refreshes pending, published, failed, ready, and retry-waiting health state
-```
-
-## V5 Product Goal
-
-V5 turns LifeLine from a workflow demo into an operations simulator.
-
-The V5 goal is to let operators stress the system before a real emergency wave happens:
-
-1. Run the full local stack with PostgreSQL/PostGIS, Redis, and Kafka.
-2. Move ambulances through live Redis location updates.
-3. Compare greedy dispatch with a bounded global optimizer.
-4. Simulate hospital exhaustion, ambulance outages, and incident surges.
-5. Publish workflow events through Kafka while preserving V4 outbox retry guarantees.
-6. Notify patient, driver, hospital, and control roles from published workflow events.
-7. Keep routing swappable behind an internal provider before adding OSRM.
-
-## V5 Target Architecture
-
-```text
-frontend/
-  role routes
+Browser
+  React + TypeScript role app
     /patient
     /driver
     /hospital
     /control
     /simulation
-
-backend/
-  routing
-    RoutingProvider
-    StraightLineRoutingProvider
-
-  live-location
-    Redis-backed ambulance location projection
-    memory profile fallback
-
-  outbox
-    Kafka publisher mode
-    V4 retry state remains authoritative
-
-  notifications
-    role-targeted notification inbox
-    generated from published outbox events
-
-  simulation
-    scenario generator
-    greedy sequential strategy
-    global min-cost strategy
-    persisted run history
-
-data/
-  PostgreSQL/PostGIS
-    operational source of truth
-    simulation run history
-
-  Redis
-    live ambulance location snapshots
-
-  Kafka
-    outbox event stream
+        |
+        v
+Gateway Service
+  Auth header forwarding
+  CORS boundary
+  Service discovery endpoint
+  API routing
+        |
+        +-------------------+-------------------+-------------------+
+        |                   |                   |                   |
+        v                   v                   v                   v
+Operations Service     Incident Service    Resource Service    Dispatch Service
+current Spring app     intake boundary      fleet/capacity      matching/routing
+        |                   |                   |                   |
+        +-------------------+-------------------+-------------------+
+                            |
+                            v
+                     Event and Data Plane
+        PostgreSQL/PostGIS  Redis  Kafka  Audit  Notifications  Simulations
 ```
 
-## V6 Product Goal
+### Service Boundaries
 
-V6 makes LifeLine trustworthy enough to demo as a production-shaped emergency platform.
+| Service | Owns | Why It Is Separate |
+| --- | --- | --- |
+| Gateway | Public API routing, CORS, frontend-facing service registry | Keeps browsers away from internal service topology and gives one place for edge policy |
+| Auth and Trust | JWT verification, user context, RBAC, audit decisions | Trust rules must be consistent and centrally testable |
+| Incident | Patient requests, triage payloads, incident ownership | Intake changes frequently and carries PII risk |
+| Resource | Ambulance fleet state, live locations, hospital capacity | Resource state has high read pressure and mixed consistency needs |
+| Dispatch | Candidate search, scoring, reservation, reroute, routing provider | Matching logic is the domain core and should stay explainable |
+| Trip | Pickup, transfer, completion state | Trip lifecycle is operational state used by patient, driver, hospital, and control |
+| Notification | Role-targeted messages and acknowledgement | Delivery can later expand to SMS, email, push, or websockets |
+| Audit | Security and workflow audit events | Immutable trust records should not be coupled to UI concerns |
+| Simulation | Surge generation, optimizer comparison, replay history | Planning workloads are heavy and should not interfere with live dispatch |
 
-The V6 goal is not external OAuth or multi-tenant identity yet. The goal is to prove local trust boundaries:
+V7 keeps a strangler-style transition: the gateway can route to the current operations backend while new service shells are deployed and verified. The important engineering decision is that API contracts, data ownership, and runtime deployment are explicit now, so future extraction is a move with contract tests rather than a rewrite.
 
-1. Every API request is authenticated except login and health.
-2. Role access is enforced by the backend, not by hidden frontend tabs.
-3. Patients see their own incidents and full contact data.
-4. Drivers and hospitals see only operational incident details for assigned work.
-5. Control can inspect the full system, run simulations, publish events, and view audit events.
-6. Sensitive actions and denied attempts are recorded in a durable audit trail.
+## Data Architecture
 
-## V6 Target Architecture
+| Data | System of Record | Notes |
+| --- | --- | --- |
+| Incidents | PostgreSQL/PostGIS | Durable emergency records with requester ownership |
+| Ambulance profile | PostgreSQL/PostGIS | Fleet identity, capability, base location, operational status |
+| Ambulance live location | Redis with TTL | Fast, ephemeral projection; dispatch falls back to persisted location |
+| Hospital profile and capacity | PostgreSQL/PostGIS | Bed availability is authoritative and auditable |
+| Trips | PostgreSQL/PostGIS | Assignment and care journey lifecycle |
+| Dispatch decisions | PostgreSQL/PostGIS | Candidate scores, winning reason, alternatives |
+| Outbox events | PostgreSQL/PostGIS, then Kafka | Transactional outbox protects state change and event publishing |
+| Notifications | PostgreSQL/PostGIS or memory profile | Role-targeted read model generated from workflow events |
+| Security audit | PostgreSQL/PostGIS or memory profile | Login, denied access, dispatch, reroute, capacity, publish, simulation, ack |
+| Simulation runs | PostgreSQL/PostGIS or memory profile | Deterministic scenario history and strategy comparison |
 
-```text
-frontend/
-  login
-    JWT stored in local storage
-    Authorization: Bearer attached to API calls
+## Dispatch Design
 
-  role routes
-    /patient      patient-owned incidents and care journey
-    /driver       assigned ambulance and trips
-    /hospital     scoped hospital capacity and incoming trips
-    /control      full operational control plus security audit
-    /simulation   control-only ops simulator
+Dispatch is built around explicit hard constraints followed by explainable scoring.
 
-backend/
-  security
-    DemoUserDirectory
-    JwtService
-    JwtAuthenticationFilter
-    SecurityAuditService
+Hard constraints reject unsafe options:
 
-  api
-    authenticated REST boundary
-    role-aware response DTOs
-    JSON error contract
+- Ambulance must be available or assigned to the allowed trip for reroute.
+- Ambulance capability must support the incident condition.
+- Hospital must support the incident condition.
+- Hospital must have available capacity.
+- Incident must still be dispatchable.
 
-  store
-    PostgreSQL source of truth
-    memory profile parity
+Scoring ranks valid options:
 
-data/
-  incidents.requester_user_id
-    patient ownership boundary
+- Pickup ETA
+- Transfer ETA
+- Incident priority
+- Hospital load
+- Ambulance capability fit
+- Reroute penalty when applicable
 
-  security_audit_events
-    actor, role, action, resource, outcome, reason, metadata, timestamp
-```
+The dispatch result stores the winning assignment and the top alternatives so operators can explain why a decision was made.
 
-## V6 Auth Model
+## Optimization Design
 
-Demo users:
+LifeLine has two optimization modes:
 
-| Username | Password | Role | Scope |
-| --- | --- | --- | --- |
-| `patient.demo` | `LIFELINE_DEMO_PASSWORD` | `PATIENT` | Own seeded and newly requested incidents |
-| `driver.demo` | `LIFELINE_DEMO_PASSWORD` | `DRIVER` | Ambulance `AMB-101` and assigned trips |
-| `hospital.demo` | `LIFELINE_DEMO_PASSWORD` | `HOSPITAL` | Hospital `HOS-201` and incoming trips |
-| `control.demo` | `LIFELINE_DEMO_PASSWORD` | `CONTROL` | Full operational access |
+| Strategy | Purpose |
+| --- | --- |
+| `GREEDY_SEQUENTIAL` | Mirrors real-time dispatch where incidents are matched one by one |
+| `GLOBAL_MIN_COST` | Compares a small batch of incidents against a globally optimal assignment |
 
-JWT claims include `sub`, `role`, optional `ambulanceId` or `hospitalId`, `iat`, and `exp`.
+The global optimizer is capped for exact comparison. That keeps it deterministic, explainable, and safe for demos. The simulator reports matched count, unmatched count, average pickup ETA, average transfer ETA, total cost, and improvement percentage.
 
-Use `LIFELINE_JWT_SECRET` outside local demos. The default secret exists only so the app can run locally without third-party setup.
+## Security Model
 
-## V6 RBAC Matrix
+LifeLine uses local JWT authentication for a self-contained demo and keeps external OAuth plug-in-ready for a later production integration.
+
+### Demo Users
+
+Set `LIFELINE_DEMO_PASSWORD` locally and use it with these demo accounts:
+
+| Username | Role | Scope |
+| --- | --- | --- |
+| `patient.demo` | `PATIENT` | Own seeded and newly requested incidents |
+| `driver.demo` | `DRIVER` | Ambulance `AMB-101` and assigned trips |
+| `hospital.demo` | `HOSPITAL` | Hospital `HOS-201` and incoming trips |
+| `control.demo` | `CONTROL` | Full operational access |
+
+JWT claims include `sub`, `role`, optional `ambulanceId`, optional `hospitalId`, `iat`, and `exp`.
+
+### RBAC Matrix
 
 | Capability | Patient | Driver | Hospital | Control |
 | --- | --- | --- | --- | --- |
 | Login and read own profile | Yes | Yes | Yes | Yes |
 | Create incident | Yes | No | No | Yes |
-| View incidents | Own only | Assigned trips only, masked | Incoming trips only, masked | All |
+| View incidents | Own only | Assigned only, masked | Incoming only, masked | All |
 | View ambulances | Assigned trip only | Own ambulance | Incoming trip only | All |
 | Update ambulance location | No | Own ambulance | No | Any |
 | View hospitals | Assigned trip only | Assigned trip only | Own hospital | All |
@@ -442,228 +152,72 @@ Use `LIFELINE_JWT_SECRET` outside local demos. The default secret exists only so
 | View audit events | No | No | No | Yes |
 | Notifications | Own role only | Own role only | Own role only | Any role |
 
-## V6 PII Policy
+### PII Policy
 
-- Patient and control users receive full patient name and phone for incidents they are allowed to see.
-- Driver and hospital users receive operational incident details only.
-- Driver and hospital incident views use the incident id as the visible patient label.
-- Driver and hospital phone values are masked to the last four digits.
-- The internal domain still keeps full incident data so dispatch and audit logic remain consistent; masking happens at the API boundary.
+- Patient and control users can see full patient data for incidents they are allowed to view.
+- Drivers and hospitals see operational incident details only.
+- Driver and hospital responses mask phone numbers and replace patient name with incident identity where possible.
+- Internal domain objects retain full data for dispatch and audit; masking happens at the API boundary.
 
-## Design Decisions
+## Eventing And Reliability
 
-| ID | Decision | Why |
+LifeLine uses a transactional outbox before Kafka publishing:
+
+```text
+1. A workflow action changes durable state.
+2. The same transaction writes an outbox event.
+3. A publisher claims pending events.
+4. Successful publishes mark `published_at`.
+5. Failed publishes record attempts, reason, and next retry time.
+6. Notifications and timelines are generated from published workflow events.
+```
+
+This design avoids losing events when the database succeeds but the broker or downstream service is temporarily unavailable.
+
+## Runtime Components
+
+| Component | Default Port | Purpose |
 | --- | --- | --- |
-| D01 | Use a modular monolith for V2, not microservices | The workflow is still changing. A modular monolith gives strong boundaries without distributed transaction complexity. |
-| D02 | Use Java 21 + Spring Boot for backend | Java is strong for durable backend systems, concurrency, type safety, and enterprise interview credibility. |
-| D03 | Keep React + TypeScript for frontend | The dashboard needs a maintainable, interactive operational UI with typed API contracts. |
-| D04 | Use PostgreSQL + PostGIS as source of truth in V2 | Dispatch depends on durable incidents, trips, capacity, reservations, and geospatial queries. |
-| D05 | Use Redis only for live/ephemeral state | Redis is appropriate for live locations, TTL locks, and fast projections, not legal source-of-truth records. |
-| D06 | Treat bed and ambulance reservation as strongly consistent | A stale read is acceptable for candidate discovery, but the final reservation must be authoritative. |
-| D07 | Add a transactional outbox before Kafka | It gives reliable event publishing while avoiding premature broker complexity. Kafka can be introduced after event contracts stabilize. |
-| D08 | Keep weighted scoring before advanced optimization | Weighted scoring is explainable and testable. Min-cost flow or Hungarian-style batch optimization can come later. |
-| D09 | Store dispatch explanations | Emergency dispatch decisions must be debuggable: ETA, capability, specialty, load, and rejection reasons should be preserved. |
-| D10 | Hide routing behind an internal interface | V2 can start with a mock ETA provider and later switch to OSRM without changing dispatch logic. |
-| D11 | Separate compatibility filters from scoring | Hard constraints reject unsafe choices; scoring ranks valid choices. This avoids hiding clinical constraints inside weights. |
-| D12 | Prefer generated/synthetic demo data until data contracts stabilize | Synthetic Bengaluru data lets us test product behavior without depending on messy external datasets early. |
-| D13 | Keep service boundaries visible in package/module names | Future extraction into services should be a move operation, not a rewrite. |
-| D14 | Add observability as part of V2 design, not as polish | Dispatch latency, reservation failure rate, capacity staleness, and reroute count are core product signals. |
-| D15 | Avoid ML triage in V2 | Clinical triage rules must be deterministic and explainable first. ML can be a later assistive layer. |
-| D16 | Keep four role experiences inside one frontend app for V3 | The product needs role-specific workflows now, but separate deployments would add friction before auth and tenancy exist. |
-| D17 | Use backend state transitions instead of frontend-only simulation | The demo should exercise real trip, capacity, reroute, audit, and outbox behavior. |
-| D18 | Reroute active trips through the dispatch engine | Alternate hospital selection must stay explainable and testable rather than becoming a special-case UI shortcut. |
-| D19 | Treat hospital capacity updates as authoritative | Hospital UI is the source for live receiving availability; reroute logic must react to exhausted capacity. |
-| D20 | Keep eventing local through the outbox in V3 | The product should prove event contracts and timeline behavior before introducing Kafka or another broker. |
-| D21 | Process the transactional outbox before adding Kafka | Reliable local event lifecycle should be proven before adding broker operations and deployment complexity. |
-| D22 | Keep automatic outbox publishing disabled by default | Local demos should be deterministic; teams can enable scheduled publishing with configuration when they are ready. |
-| D23 | Use `SKIP LOCKED` for PostgreSQL outbox batches | Future workers should be able to claim pending events concurrently without double-publishing the same row. |
-| D24 | Expose outbox health through product UI, not logs only | Operators should see backlog age, last publish time, and event-type pressure directly inside the Control Tower. |
-| D25 | Record outbox retry state before adding external delivery adapters | Attempts, last failure reason, and next retry time make failures debuggable before Kafka, notifications, or webhooks are introduced. |
-| D26 | Keep external delivery adapters out of V4 runtime | V4 should prove claim, retry, and observability contracts first. Notification, Redis, and broker adapters can build on this in V5+ without changing the outbox core. |
-| D27 | Make V5 a required Docker runtime release | Redis and Kafka behavior should be exercised as real infrastructure in V5, while memory profile remains a lightweight fallback. |
-| D28 | Add routing as a provider boundary before OSRM | The dispatch engine should depend on route estimates, not a specific routing vendor. |
-| D29 | Keep simulation deterministic with explicit random seeds | Operators and reviewers should be able to replay the same incident surge and compare strategies repeatably. |
-| D30 | Compare greedy and global optimization side by side | V5 should teach why optimization matters without replacing the explainable greedy workflow prematurely. |
-| D31 | Use local JWT auth for V6 instead of external OAuth | The demo remains self-contained while leaving external providers plug-in-ready for a later version. |
-| D32 | Enforce RBAC in the backend | Frontend route gating improves UX, but the API must be the trust boundary. |
-| D33 | Mask PII at response mapping time | Dispatch can keep rich internal data while role-specific API DTOs enforce least privilege. |
-| D34 | Persist security audit events | Production trust requires an inspectable record of allowed and denied sensitive actions. |
-| D35 | Keep control-only operations explicit | Dispatch, reroute, simulation, outbox publishing, and audit views carry operational risk and should be centralized. |
-| D36 | Use configurable CORS origins | Local demos should work by default, but wildcard CORS should not be part of the trusted runtime. |
+| Frontend | `5173` | React role app |
+| Gateway service | `8088` | Browser-facing API entry point |
+| Operations service | `8080` | Current authenticated workflow API |
+| Incident service | `8091` | Incident boundary scaffold |
+| Resource service | `8092` | Fleet and hospital boundary scaffold |
+| Dispatch service | `8093` | Matching boundary scaffold |
+| Notification service | `8094` | Notification boundary scaffold |
+| Audit service | `8095` | Audit boundary scaffold |
+| Simulation service | `8096` | Simulation boundary scaffold |
+| PostgreSQL/PostGIS | `5432` | Durable operational data |
+| Redis | `6379` | Live ambulance locations |
+| Kafka | `9092` | Outbox event stream |
 
-## V2 Data Ownership
+## Local Development
 
-| Data | Owner Module | V2 Storage |
-| --- | --- | --- |
-| Incident | intake | PostgreSQL |
-| Ambulance profile | ambulance-registry | PostgreSQL |
-| Ambulance live location | ambulance-registry | Redis projection, PostgreSQL snapshot optional |
-| Hospital profile | hospital-capacity | PostgreSQL |
-| Hospital bed availability | hospital-capacity | PostgreSQL authoritative record, Redis projection optional |
-| Reservation | dispatch plus resource owner modules | PostgreSQL transaction |
-| Trip | trip-tracking | PostgreSQL |
-| Dispatch explanation | audit | PostgreSQL |
-| Outbox event | audit | PostgreSQL outbox table |
-
-## V2 Consistency Model
-
-Candidate search can use slightly stale read models because it only proposes options.
-
-Final assignment cannot use stale state. The V2 reservation commit must verify:
-
-- Incident is still dispatchable
-- Ambulance is still available
-- Ambulance capability still satisfies the incident
-- Hospital can still treat the condition
-- Hospital still has capacity
-- Trip is created exactly once for the incident
-
-The reservation operation should be idempotent using a request key or incident-level uniqueness constraint.
-
-## API Surface
-
-Current APIs:
-
-- `POST /api/auth/login`
-- `GET /api/auth/me`
-- `GET /api/ambulances`
-- `GET /api/hospitals`
-- `GET /api/incidents`
-- `POST /api/incidents`
-- `POST /api/dispatch`
-- `GET /api/trips`
-- `GET /api/dispatch-decisions`
-- `GET /api/outbox-events`
-- `GET /api/outbox-events/pending`
-- `GET /api/outbox-events/summary`
-- `POST /api/outbox-events/publish`
-- `GET /api/metrics`
-- `POST /api/demo/reset`
-- `POST /api/trips/{tripId}/status`
-- `POST /api/hospitals/{hospitalId}/capacity`
-- `POST /api/trips/{tripId}/reroute`
-- `POST /api/ambulances/{id}/location`
-- `GET /api/ambulance-locations`
-- `GET /api/notifications?role={role}`
-- `POST /api/notifications/{id}/ack`
-- `POST /api/simulations`
-- `GET /api/simulations`
-- `GET /api/simulations/{id}`
-- `GET /api/audit-events?limit={limit}`
-
-V2 keeps the original APIs stable where possible, V3 adds role workflow actions for trips, hospital capacity, and rerouting, V4 adds outbox processing and health operations, V5 adds live location, notifications, and simulation APIs, and V6 adds authentication, role-scoped responses, and audit events. The V4/V5/V6 publish response reports `published`, `failed`, and remaining `pending` events.
-
-## V4/V5/V6 Runtime Configuration
-
-V4 introduced the local logging/failure adapters for retry demos:
-
-```yaml
-lifeline:
-  outbox:
-    publisher:
-      mode: logging
-```
-
-For local retry demos, start the backend with a failing publisher:
-
-```powershell
-cd backend
-mvn.cmd spring-boot:run "-Dspring-boot.run.profiles=memory" "-Dspring-boot.run.arguments=--lifeline.outbox.publisher.mode=fail-all --lifeline.outbox.publisher.failure-message=demo-adapter-down"
-```
-
-The publisher modes are:
-
-- `logging`: records a successful local publish in backend logs
-- `fail-all`: fails every publish attempt
-- `fail-event-type`: fails only events matching `lifeline.outbox.publisher.fail-event-type`
-- `kafka`: publishes `OutboxEventEnvelope` JSON to Kafka topic `lifeline.outbox.events`
-
-V5 full runtime defaults to Kafka publishing and Redis live-location projection:
-
-```yaml
-lifeline:
-  outbox:
-    publisher:
-      mode: kafka
-  kafka:
-    outbox-topic: lifeline.outbox.events
-    publish-timeout-seconds: 5
-  live-location:
-    ttl-seconds: 180
-```
-
-The `memory` Spring profile remains available for lightweight demos and tests. It keeps outbox publishing in logging mode and uses in-memory live ambulance locations instead of Redis.
-
-V6 auth and CORS defaults:
-
-```yaml
-lifeline:
-  security:
-    jwt-secret: ${LIFELINE_JWT_SECRET}
-    token-ttl-minutes: 480
-  cors:
-    allowed-origins: ${LIFELINE_ALLOWED_ORIGINS:http://localhost:5173}
-```
-
-The `memory` profile supplies a dev-only JWT secret fallback. The full PostgreSQL/Redis/Kafka runtime expects `LIFELINE_JWT_SECRET` to be set.
-
-V5 simulation rules:
-
-- `GREEDY_SEQUENTIAL` mirrors the current dispatch behavior.
-- `GLOBAL_MIN_COST` performs bounded exact optimization for up to 12 incidents.
-- Requests with `strategy=GLOBAL_MIN_COST` and more than 12 incidents are rejected.
-- Simulation runs and assignments are persisted in `simulation_runs` and `simulation_assignments`.
-
-The PostgreSQL outbox integration test is opt-in because it requires Docker:
-
-```powershell
-cd backend
-mvn.cmd test "-Dlifeline.integration.postgres=true" "-Dtest=JdbcOutboxIntegrationTest"
-```
-
-## Prerequisites
+### Prerequisites
 
 - JDK 21
 - Maven 3.9+
 - Node.js 20+
 - npm 10+
-- Docker Desktop or a compatible Docker runtime for the full V5 stack
+- Docker Desktop or a compatible Docker runtime for the full stack
 
-## Run Backend
-
-Start the V5 runtime first:
+### Full Local Runtime
 
 ```powershell
+cd C:\Users\sravya\LifeLine
+$env:LIFELINE_JWT_SECRET="replace-with-a-long-local-secret"
+$env:LIFELINE_DEMO_PASSWORD="choose-a-local-demo-password"
 docker compose up -d postgres redis kafka
 ```
 
-Then run the backend:
+Run the backend:
 
 ```powershell
 cd backend
-$env:LIFELINE_JWT_SECRET="replace-with-a-long-local-secret"
-$env:LIFELINE_DEMO_PASSWORD="choose-a-local-demo-password"
-mvn spring-boot:run
+mvn.cmd spring-boot:run
 ```
 
-Backend starts at `http://localhost:8080`.
-
-Quick check:
-
-```powershell
-$login = curl.exe -s -X POST http://localhost:8080/api/auth/login -H "Content-Type: application/json" -d "{\"username\":\"control.demo\",\"password\":\"$env:LIFELINE_DEMO_PASSWORD\"}" | ConvertFrom-Json
-curl.exe -H "Authorization: Bearer $($login.token)" http://localhost:8080/api/metrics
-```
-
-To run the fallback in-memory profile instead of PostgreSQL:
-
-```powershell
-cd backend
-$env:LIFELINE_DEMO_PASSWORD="choose-a-local-demo-password"
-mvn.cmd spring-boot:run "-Dspring-boot.run.profiles=memory"
-```
-
-## Run Frontend
+Run the frontend:
 
 ```powershell
 cd frontend
@@ -671,14 +225,145 @@ npm install
 npm run dev
 ```
 
-Frontend starts at `http://localhost:5173`.
+Open `http://localhost:5173`.
 
-Role routes:
+### Memory Profile
 
-- `http://localhost:5173/patient`
-- `http://localhost:5173/driver`
-- `http://localhost:5173/hospital`
-- `http://localhost:5173/control`
-- `http://localhost:5173/simulation`
+The memory profile is useful for lightweight demos and tests when Docker is not available:
 
-The app opens with the login screen. Use one of the demo users from the V6 auth table above.
+```powershell
+cd backend
+$env:LIFELINE_DEMO_PASSWORD="choose-a-local-demo-password"
+mvn.cmd spring-boot:run "-Dspring-boot.run.profiles=memory"
+```
+
+The memory profile keeps the outbox publisher in logging mode and uses an in-memory live-location projection instead of Redis.
+
+## API Surface
+
+### Auth
+
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+
+### Operations
+
+- `GET /api/ambulances`
+- `POST /api/ambulances/{id}/location`
+- `GET /api/ambulance-locations`
+- `GET /api/hospitals`
+- `POST /api/hospitals/{hospitalId}/capacity`
+- `GET /api/incidents`
+- `POST /api/incidents`
+- `GET /api/trips`
+- `POST /api/trips/{tripId}/status`
+- `POST /api/trips/{tripId}/reroute`
+- `POST /api/dispatch`
+
+### Reliability And Planning
+
+- `GET /api/dispatch-decisions`
+- `GET /api/outbox-events`
+- `GET /api/outbox-events/pending`
+- `GET /api/outbox-events/summary`
+- `POST /api/outbox-events/publish`
+- `GET /api/notifications?role={role}`
+- `POST /api/notifications/{id}/ack`
+- `POST /api/simulations`
+- `GET /api/simulations`
+- `GET /api/simulations/{id}`
+- `GET /api/audit-events?limit={limit}`
+- `GET /api/metrics`
+- `POST /api/demo/reset`
+
+### Platform
+
+- `GET /api/platform/services`
+- `GET /actuator/health`
+
+## Deployment Direction
+
+V7 targets a production-ready local and container deployment shape:
+
+- Docker Compose for full local orchestration.
+- A gateway service as the only browser-facing API.
+- Separate deployable service boundaries for incident, resource, dispatch, notification, audit, and simulation.
+- Kubernetes manifests for a cloud-ready baseline.
+- Environment-driven secrets.
+- Health endpoints for every service.
+- PostgreSQL, Redis, and Kafka as explicit infrastructure dependencies.
+
+Recommended production hardening beyond this repository:
+
+- Replace local JWT demo auth with managed OAuth/OIDC.
+- Move secrets to a platform secret manager.
+- Add TLS termination at an ingress controller.
+- Add OpenTelemetry tracing across gateway and services.
+- Use managed PostgreSQL, Redis, and Kafka.
+- Add websocket or SSE push for live trip updates.
+- Add OSRM or GraphHopper behind the routing provider.
+- Add tenant and organization boundaries for real hospital networks.
+
+## Design Decisions
+
+| ID | Decision | Reasoning |
+| --- | --- | --- |
+| D01 | Java 21 and Spring Boot for backend services | Strong typing, mature security, transactional data access, and enterprise deployment credibility |
+| D02 | React and TypeScript for the frontend | The UI needs typed contracts, rich maps, simulation controls, and role-specific workflows |
+| D03 | PostgreSQL/PostGIS as the source of truth | Incidents, ambulances, hospitals, trips, audit, and simulation runs are durable geospatial records |
+| D04 | Redis only for live projections | Ambulance movement is high-frequency and ephemeral, so TTL state belongs outside durable records |
+| D05 | Kafka behind a transactional outbox | State changes must not be lost when event publishing fails |
+| D06 | Gateway first for microservices | Browsers should depend on one public API boundary while services evolve internally |
+| D07 | Strangler migration over big-bang rewrite | The current backend works; service extraction should preserve behavior while boundaries become deployable |
+| D08 | Backend-enforced RBAC | The API is the trust boundary; frontend route hiding is only UX |
+| D09 | PII masking at response mapping | Domain logic keeps needed data while each role receives the least data required |
+| D10 | Audit allowed and denied actions | Trust requires visibility into both successful sensitive actions and blocked attempts |
+| D11 | Routing provider abstraction | Dispatch should depend on route estimates, not a specific vendor or engine |
+| D12 | Explainable dispatch before opaque ML | Emergency workflows need deterministic, auditable decisions before assistive prediction |
+| D13 | Global optimization as simulator comparison | Batch optimization teaches tradeoffs without replacing real-time dispatch prematurely |
+| D14 | Role-specific UI surfaces | A patient, driver, hospital operator, and control tower need different mental models and workflows |
+| D15 | Environment-driven secrets | Demo convenience must not require committed credentials |
+| D16 | Health endpoints everywhere | Distributed systems need fast runtime inspection and deployability checks |
+
+## Testing
+
+Backend:
+
+```powershell
+cd backend
+mvn.cmd test
+```
+
+Frontend:
+
+```powershell
+cd frontend
+npm.cmd run build
+```
+
+Opt-in PostgreSQL/Testcontainers outbox test:
+
+```powershell
+cd backend
+mvn.cmd test "-Dlifeline.integration.postgres=true" "-Dtest=JdbcOutboxIntegrationTest"
+```
+
+## Demo Recording Checklist
+
+Use this checklist when adding screenshots or recording the project demo:
+
+1. Patient signs in, checks coverage, submits a critical incident, and sees request progress.
+2. Control dispatches the incident and explains the winning ambulance and hospital.
+3. Driver sees only assigned operational details, advances pickup and transfer.
+4. Hospital sees incoming ambulance load and updates capacity.
+5. Control exhausts a hospital and reroutes an active trip.
+6. Simulation compares greedy and global optimization with hospital exhaustion.
+7. Control publishes outbox events and checks notification/audit state.
+
+Suggested README media sections can be added later:
+
+- `docs/media/patient-flow.png`
+- `docs/media/driver-flow.png`
+- `docs/media/hospital-flow.png`
+- `docs/media/control-tower.png`
+- `docs/media/simulation-run.png`
