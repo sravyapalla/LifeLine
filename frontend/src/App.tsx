@@ -995,55 +995,98 @@ function HospitalView({
   onHospitalCapacity: (hospitalId: string, availableBeds: number) => void;
   busy: boolean;
 }) {
+  if (!data || data.hospitals.length === 0) {
+    return <div className="empty-state">No hospital assigned</div>;
+  }
+
+  const hospital = data.hospitals[0];
+  const incomingTrips = data.trips.filter((trip) => trip.hospitalId === hospital.id && activeTripStatuses.includes(trip.status));
+  const draft = capacityDrafts[hospital.id] ?? hospital.availableBeds;
+  const loadPercent = hospital.totalBeds === 0 ? 0 : Math.round(((hospital.totalBeds - hospital.availableBeds) / hospital.totalBeds) * 100);
+
   return (
-    <section className="hospital-grid">
-      {data?.hospitals.map((hospital) => {
-        const incomingTrips = data.trips.filter((trip) => trip.hospitalId === hospital.id && activeTripStatuses.includes(trip.status));
-        const draft = capacityDrafts[hospital.id] ?? hospital.availableBeds;
+    <section className="role-layout hospital-ops-layout">
+      <aside className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">{hospital.id}</p>
+            <h2>{hospital.name}</h2>
+          </div>
+          <span className={`capacity-pill ${hospital.availableBeds === 0 ? 'exhausted' : ''}`}>{hospital.availableBeds}/{hospital.totalBeds}</span>
+        </div>
 
-        return (
-          <article className="panel hospital-card" key={hospital.id}>
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">{hospital.id}</p>
-                <h2>{hospital.name}</h2>
-              </div>
-              <span className={`capacity-pill ${hospital.availableBeds === 0 ? 'exhausted' : ''}`}>{hospital.availableBeds}/{hospital.totalBeds}</span>
-            </div>
+        <div className="hospital-load-card">
+          <strong>{loadPercent}%</strong>
+          <span>Capacity Used</span>
+          <div>
+            <i style={{ width: `${Math.min(100, loadPercent)}%` }} />
+          </div>
+        </div>
 
-            <div className="specialty-row">
-              {hospital.specialties.map((specialty) => <span key={specialty}>{specialty}</span>)}
-            </div>
+        <div className="specialty-row">
+          {hospital.specialties.map((specialty) => <span key={specialty}>{specialty}</span>)}
+        </div>
 
-            <div className="capacity-control">
-              <label>
-                Beds
-                <input
-                  type="number"
-                  min={0}
-                  max={hospital.totalBeds}
-                  value={draft}
-                  onChange={(event) => setCapacityDrafts({ ...capacityDrafts, [hospital.id]: Number(event.target.value) })}
-                />
-              </label>
-              <button className="primary-button" type="button" onClick={() => onHospitalCapacity(hospital.id, draft)} disabled={busy}>
-                Update
-              </button>
-              <button className="ghost-button full-width" type="button" onClick={() => onHospitalCapacity(hospital.id, 0)} disabled={busy}>
-                Mark Exhausted
-              </button>
-            </div>
+        <div className="capacity-control">
+          <label>
+            Beds
+            <input
+              type="number"
+              min={0}
+              max={hospital.totalBeds}
+              value={draft}
+              onChange={(event) => setCapacityDrafts({ ...capacityDrafts, [hospital.id]: Number(event.target.value) })}
+            />
+          </label>
+          <button className="primary-button" type="button" onClick={() => onHospitalCapacity(hospital.id, draft)} disabled={busy}>
+            Update
+          </button>
+          <button className="ghost-button full-width" type="button" onClick={() => onHospitalCapacity(hospital.id, 0)} disabled={busy}>
+            Mark Exhausted
+          </button>
+        </div>
+      </aside>
 
-            <div className="compact-list">
-              <h3>Incoming</h3>
-              {incomingTrips.length === 0 && <div className="empty-state compact">No incoming trips</div>}
-              {incomingTrips.map((trip) => (
-                <HospitalTripRow key={trip.id} trip={trip} data={data} />
-              ))}
-            </div>
-          </article>
-        );
-      })}
+      <section className="panel wide-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Receiving</p>
+            <h2>Incoming Ambulances</h2>
+          </div>
+          <span className="count">{incomingTrips.length}</span>
+        </div>
+
+        <div className="hospital-incoming-board">
+          {incomingTrips.length === 0 && <div className="empty-state">No incoming ambulances</div>}
+          {incomingTrips.map((trip) => (
+            <HospitalTripRow key={trip.id} trip={trip} data={data} />
+          ))}
+        </div>
+      </section>
+
+      <aside className="panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Signals</p>
+            <h2>Receiving Map</h2>
+          </div>
+          <MapPin size={18} />
+        </div>
+
+        <InfoLine label="Available Beds" value={String(hospital.availableBeds)} />
+        <InfoLine label="Incoming Trips" value={String(incomingTrips.length)} />
+        <InfoLine label="Specialties" value={hospital.specialties.join(', ')} />
+        <MapPanel
+          ambulances={data.ambulances}
+          liveLocations={data.liveLocations}
+          hospitals={data.hospitals}
+          incidents={data.incidents}
+          trips={data.trips}
+          selectedIncidentId={incomingTrips[0]?.incidentId ?? ''}
+          selectedTripId={incomingTrips[0]?.id ?? ''}
+          compact
+        />
+      </aside>
     </section>
   );
 }
@@ -1093,6 +1136,8 @@ function ControlView({
           </div>
           <span className="count">{data?.incidents.length ?? 0}</span>
         </div>
+
+        <ControlCommandSummary data={data} />
 
         <div className="incident-list">
           {data?.incidents.map((incident) => (
@@ -1207,6 +1252,34 @@ function ControlView({
         <PlatformServicesPanel services={platformServices} />
       </aside>
     </section>
+  );
+}
+
+function ControlCommandSummary({ data }: { data: DashboardState | null }) {
+  const openIncidents = data?.incidents.filter((incident) => incident.status === 'NEW').length ?? 0;
+  const activeTrips = data?.trips.filter((trip) => activeTripStatuses.includes(trip.status)).length ?? 0;
+  const exhaustedHospitals = data?.hospitals.filter((hospital) => hospital.availableBeds === 0).length ?? 0;
+  const availableAmbulances = data?.ambulances.filter((ambulance) => ambulance.status === 'AVAILABLE').length ?? 0;
+
+  return (
+    <div className="command-summary">
+      <article>
+        <strong>{openIncidents}</strong>
+        <span>Open</span>
+      </article>
+      <article>
+        <strong>{activeTrips}</strong>
+        <span>Active</span>
+      </article>
+      <article>
+        <strong>{availableAmbulances}</strong>
+        <span>Units</span>
+      </article>
+      <article className={exhaustedHospitals > 0 ? 'attention' : ''}>
+        <strong>{exhaustedHospitals}</strong>
+        <span>Exhausted</span>
+      </article>
+    </div>
   );
 }
 

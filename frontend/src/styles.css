@@ -414,6 +414,10 @@ button {
   max-width: 1560px;
 }
 
+.hospital-ops-layout {
+  grid-template-columns: 340px minmax(0, 1fr) 420px;
+}
+
 .simulation-layout {
   display: grid;
   gap: 18px;
@@ -1125,6 +1129,45 @@ button {
   min-height: 500px;
 }
 
+.hospital-load-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 14px;
+}
+
+.hospital-load-card strong {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.hospital-load-card span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.hospital-load-card div {
+  background: #dbe4ee;
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+
+.hospital-load-card i {
+  background: #dc2626;
+  display: block;
+  height: 100%;
+}
+
+.hospital-incoming-board {
+  display: grid;
+  gap: 10px;
+}
+
 .capacity-pill {
   background: #dcfce7;
   color: #166534;
@@ -1246,6 +1289,39 @@ button {
 
 .timeline {
   margin-top: 16px;
+}
+
+.command-summary {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 14px;
+}
+
+.command-summary article {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  min-height: 66px;
+  padding: 10px;
+}
+
+.command-summary article.attention {
+  background: #fff7ed;
+  border-color: #fed7aa;
+}
+
+.command-summary strong {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.command-summary span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .audit-panel {
@@ -1453,6 +1529,7 @@ button {
   .patient-layout,
   .control-layout,
   .driver-layout,
+  .hospital-ops-layout,
   .simulation-layout {
     grid-template-columns: 320px minmax(0, 1fr);
   }
@@ -1460,6 +1537,7 @@ button {
   .patient-layout > aside:last-child,
   .control-layout > aside:last-child,
   .driver-layout > aside:last-child,
+  .hospital-ops-layout > aside:last-child,
   .simulation-layout > aside:last-child {
     grid-column: 1 / -1;
     min-height: auto;
@@ -1484,6 +1562,7 @@ button {
   .patient-layout,
   .control-layout,
   .driver-layout,
+  .hospital-ops-layout,
   .simulation-layout,
   .comparison-grid,
   .hospital-grid,
