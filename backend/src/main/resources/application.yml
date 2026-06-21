@@ -8,6 +8,15 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+  data:
+    redis:
+      host: ${LIFELINE_REDIS_HOST:localhost}
+      port: ${LIFELINE_REDIS_PORT:6379}
+  kafka:
+    bootstrap-servers: ${LIFELINE_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
 server:
   port: 8080
@@ -22,6 +31,10 @@ lifeline:
   dispatch:
     average-ambulance-speed-kmph: 32
     average-transfer-speed-kmph: 28
+  live-location:
+    ttl-seconds: 180
+  kafka:
+    outbox-topic: lifeline.outbox.events
   outbox:
     publish:
       enabled: false
