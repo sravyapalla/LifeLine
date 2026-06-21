@@ -32,34 +32,18 @@ public class DispatchEngine {
     }
 
     public DispatchDecision decide(Incident incident, List<Ambulance> ambulances, List<Hospital> hospitals) {
-        AmbulanceType requiredType = requiredAmbulanceType(incident.condition(), incident.priority());
-
-        List<Ambulance> eligibleAmbulances = ambulances.stream()
-                .filter(ambulance -> ambulance.status() == AmbulanceStatus.AVAILABLE)
-                .filter(ambulance -> ambulance.type().canHandle(requiredType))
-                .toList();
-
-        List<Hospital> eligibleHospitals = hospitals.stream()
-                .filter(Hospital::hasCapacity)
-                .filter(hospital -> hospital.canTreat(incident.condition()))
-                .toList();
-
-        List<CandidateScore> scores = eligibleAmbulances.stream()
-                .flatMap(ambulance -> eligibleHospitals.stream()
-                        .map(hospital -> score(incident, ambulance, hospital, requiredType)))
-                .sorted(Comparator.comparingDouble(CandidateScore::totalCost))
-                .toList();
+        List<CandidateScore> scores = scoreCandidates(incident, ambulances, hospitals);
 
         if (scores.isEmpty()) {
             throw new NoDispatchCandidateException("No compatible ambulance and hospital pair is available.");
         }
 
         CandidateScore winner = scores.getFirst();
-        Ambulance ambulance = eligibleAmbulances.stream()
+        Ambulance ambulance = ambulances.stream()
                 .filter(candidate -> candidate.id().equals(winner.ambulanceId()))
                 .findFirst()
                 .orElseThrow();
-        Hospital hospital = eligibleHospitals.stream()
+        Hospital hospital = hospitals.stream()
                 .filter(candidate -> candidate.id().equals(winner.hospitalId()))
                 .findFirst()
                 .orElseThrow();
@@ -95,6 +79,26 @@ public class DispatchEngine {
                 .orElseThrow();
 
         return new DispatchDecision(ambulance, hospital, winner, scores.stream().limit(8).toList());
+    }
+
+    public List<CandidateScore> scoreCandidates(Incident incident, List<Ambulance> ambulances, List<Hospital> hospitals) {
+        AmbulanceType requiredType = requiredAmbulanceType(incident.condition(), incident.priority());
+
+        List<Ambulance> eligibleAmbulances = ambulances.stream()
+                .filter(ambulance -> ambulance.status() == AmbulanceStatus.AVAILABLE)
+                .filter(ambulance -> ambulance.type().canHandle(requiredType))
+                .toList();
+
+        List<Hospital> eligibleHospitals = hospitals.stream()
+                .filter(Hospital::hasCapacity)
+                .filter(hospital -> hospital.canTreat(incident.condition()))
+                .toList();
+
+        return eligibleAmbulances.stream()
+                .flatMap(ambulance -> eligibleHospitals.stream()
+                        .map(hospital -> score(incident, ambulance, hospital, requiredType)))
+                .sorted(Comparator.comparingDouble(CandidateScore::totalCost))
+                .toList();
     }
 
     private CandidateScore score(Incident incident, Ambulance ambulance, Hospital hospital, AmbulanceType requiredType) {

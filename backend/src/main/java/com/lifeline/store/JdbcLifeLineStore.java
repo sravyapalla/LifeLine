@@ -974,8 +974,15 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 """, simulationAssignmentMapper(), id);
         Map<OptimizationStrategy, List<SimulationAssignment>> byStrategy = assignments.stream()
                 .collect(Collectors.groupingBy(SimulationAssignment::strategy, LinkedHashMap::new, Collectors.toList()));
+        double greedyCost = totalSimulationCost(byStrategy.getOrDefault(OptimizationStrategy.GREEDY_SEQUENTIAL, List.of()));
         List<SimulationStrategyResult> strategyResults = byStrategy.entrySet().stream()
-                .map(entry -> summarize(entry.getKey(), entry.getValue(), 0))
+                .map(entry -> summarize(
+                        entry.getKey(),
+                        entry.getValue(),
+                        entry.getKey() == OptimizationStrategy.GLOBAL_MIN_COST
+                                ? improvementPercent(greedyCost, totalSimulationCost(entry.getValue()))
+                                : 0
+                ))
                 .toList();
         return new SimulationResult(id, request, createdAt, strategyResults);
     }
@@ -995,6 +1002,20 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 rs.getBoolean("matched"),
                 rs.getString("reason")
         );
+    }
+
+    private double totalSimulationCost(List<SimulationAssignment> assignments) {
+        return assignments.stream()
+                .filter(SimulationAssignment::matched)
+                .mapToDouble(SimulationAssignment::totalCost)
+                .sum();
+    }
+
+    private double improvementPercent(double baselineCost, double optimizedCost) {
+        if (baselineCost <= 0) {
+            return 0;
+        }
+        return Math.max(0, ((baselineCost - optimizedCost) / baselineCost) * 100);
     }
 
     private SimulationStrategyResult summarize(

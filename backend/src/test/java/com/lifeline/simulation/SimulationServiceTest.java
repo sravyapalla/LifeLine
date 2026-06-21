@@ -29,8 +29,11 @@ class SimulationServiceTest {
                 OptimizationStrategy.GREEDY_SEQUENTIAL
         ));
 
-        assertThat(result.strategyResults()).hasSize(1);
+        assertThat(result.strategyResults()).hasSize(2);
         assertThat(result.strategyResults().getFirst().assignments()).hasSize(5);
+        assertThat(result.strategyResults())
+                .extracting(SimulationStrategyResult::strategy)
+                .containsExactly(OptimizationStrategy.GREEDY_SEQUENTIAL, OptimizationStrategy.GLOBAL_MIN_COST);
         assertThat(service.simulations()).extracting(SimulationResult::id).contains(result.id());
     }
 
@@ -54,5 +57,27 @@ class SimulationServiceTest {
         ));
 
         assertThat(result.strategyResults().getFirst().unmatchedCount()).isEqualTo(3);
+    }
+
+    @Test
+    void rejectsLargeExactOptimizationRequests() {
+        InMemoryLifeLineStore store = new InMemoryLifeLineStore();
+        store.reset();
+        SimulationService service = new SimulationService(
+                store,
+                new DispatchEngine(new StraightLineRoutingProvider(), 32, 28)
+        );
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.run(new SimulationRequest(
+                        13,
+                        99L,
+                        0.5,
+                        List.of(),
+                        List.of(),
+                        0,
+                        OptimizationStrategy.GLOBAL_MIN_COST
+                )))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("capped at 12");
     }
 }
