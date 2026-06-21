@@ -290,6 +290,7 @@ public class SimulationService {
             double longitude = BENGALURU_CENTER.longitude() + ((random.nextDouble() - 0.5) * 0.18);
             incidents.add(new Incident(
                     "SIM-INC-" + (index + 1),
+                    "simulation",
                     "Sim Patient " + (index + 1),
                     "+91-90000-SIM",
                     condition,

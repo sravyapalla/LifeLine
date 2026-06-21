@@ -25,6 +25,7 @@ class DispatchEngineTest {
     void choosesCompatibleAmbulanceAndHospitalForCardiacIncident() {
         Incident incident = new Incident(
                 "INC-1",
+                "patient.demo",
                 "Patient",
                 "+91-90000-00000",
                 EmergencyCondition.CARDIAC,
@@ -54,6 +55,7 @@ class DispatchEngineTest {
     void rerouteChoosesAlternateHospitalAndExcludesCurrentHospital() {
         Incident incident = new Incident(
                 "INC-2",
+                "patient.demo",
                 "Patient",
                 "+91-90000-00000",
                 EmergencyCondition.TRAUMA,

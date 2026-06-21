@@ -54,7 +54,18 @@ public interface LifeLineStore {
 
     Optional<SimulationResult> findSimulation(String id);
 
+    default Incident createIncident(
+            String patientName,
+            String phone,
+            EmergencyCondition condition,
+            IncidentPriority priority,
+            Location location
+    ) {
+        return createIncident("patient.demo", patientName, phone, condition, priority, location);
+    }
+
     Incident createIncident(
+            String requesterUserId,
             String patientName,
             String phone,
             EmergencyCondition condition,

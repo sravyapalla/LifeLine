@@ -77,7 +77,7 @@ public class JdbcLifeLineStore implements LifeLineStore {
     @Override
     public List<Incident> incidents() {
         return jdbc.query("""
-                SELECT id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
+                SELECT id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
                 FROM incidents
                 ORDER BY created_at DESC
                 """, incidentMapper());
@@ -203,7 +203,7 @@ public class JdbcLifeLineStore implements LifeLineStore {
     @Override
     public Optional<Incident> findIncident(String id) {
         return queryOptional("""
-                SELECT id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
+                SELECT id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
                 FROM incidents
                 WHERE id = ?
                 """, incidentMapper(), id);
@@ -254,6 +254,7 @@ public class JdbcLifeLineStore implements LifeLineStore {
     @Override
     @Transactional
     public Incident createIncident(
+            String requesterUserId,
             String patientName,
             String phone,
             EmergencyCondition condition,
@@ -264,10 +265,11 @@ public class JdbcLifeLineStore implements LifeLineStore {
         Instant now = Instant.now();
 
         jdbc.update("""
-                INSERT INTO incidents (id, patient_name, phone, condition, priority, latitude, longitude, created_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO incidents (id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 id,
+                requesterUserId,
                 patientName,
                 phone,
                 condition.name(),
@@ -692,7 +694,7 @@ public class JdbcLifeLineStore implements LifeLineStore {
 
     private Optional<Incident> lockIncident(String id) {
         return queryOptional("""
-                SELECT id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
+                SELECT id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
                 FROM incidents
                 WHERE id = ?
                 FOR UPDATE
@@ -768,8 +770,8 @@ public class JdbcLifeLineStore implements LifeLineStore {
         insertHospital(new Hospital("HOS-205", "Baptist North Care", new Location(13.0358, 77.5891), Set.of(EmergencyCondition.STROKE, EmergencyCondition.GENERAL), 44, 11, 0.84));
 
         Instant now = Instant.now();
-        insertIncident(new Incident("INC-301", "Ananya Rao", "+91-90000-10001", EmergencyCondition.CARDIAC, IncidentPriority.CRITICAL, new Location(12.9458, 77.6309), now.minusSeconds(180), IncidentStatus.NEW));
-        insertIncident(new Incident("INC-302", "Rohan Mehta", "+91-90000-10002", EmergencyCondition.TRAUMA, IncidentPriority.HIGH, new Location(12.9166, 77.6101), now.minusSeconds(90), IncidentStatus.NEW));
+        insertIncident(new Incident("INC-301", "patient.demo", "Ananya Rao", "+91-90000-10001", EmergencyCondition.CARDIAC, IncidentPriority.CRITICAL, new Location(12.9458, 77.6309), now.minusSeconds(180), IncidentStatus.NEW));
+        insertIncident(new Incident("INC-302", "patient.demo", "Rohan Mehta", "+91-90000-10002", EmergencyCondition.TRAUMA, IncidentPriority.HIGH, new Location(12.9166, 77.6101), now.minusSeconds(90), IncidentStatus.NEW));
     }
 
     private void insertAmbulance(Ambulance ambulance) {
@@ -810,10 +812,11 @@ public class JdbcLifeLineStore implements LifeLineStore {
 
     private void insertIncident(Incident incident) {
         jdbc.update("""
-                INSERT INTO incidents (id, patient_name, phone, condition, priority, latitude, longitude, created_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO incidents (id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 incident.id(),
+                incident.requesterUserId(),
                 incident.patientName(),
                 incident.phone(),
                 incident.condition().name(),
@@ -892,6 +895,7 @@ public class JdbcLifeLineStore implements LifeLineStore {
     private RowMapper<Incident> incidentMapper() {
         return (rs, rowNum) -> new Incident(
                 rs.getString("id"),
+                rs.getString("requester_user_id"),
                 rs.getString("patient_name"),
                 rs.getString("phone"),
                 EmergencyCondition.valueOf(rs.getString("condition")),

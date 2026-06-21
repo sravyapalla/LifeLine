@@ -4,6 +4,7 @@ import java.time.Instant;
 
 public record Incident(
         String id,
+        String requesterUserId,
         String patientName,
         String phone,
         EmergencyCondition condition,
@@ -13,7 +14,6 @@ public record Incident(
         IncidentStatus status
 ) {
     public Incident withStatus(IncidentStatus nextStatus) {
-        return new Incident(id, patientName, phone, condition, priority, location, createdAt, nextStatus);
+        return new Incident(id, requesterUserId, patientName, phone, condition, priority, location, createdAt, nextStatus);
     }
 }
-
