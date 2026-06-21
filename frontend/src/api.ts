@@ -8,6 +8,7 @@ import type {
   Metrics,
   OutboxEvent,
   OutboxPublishResponse,
+  OutboxSummary,
   Trip,
   TripStatus
 } from './types';
@@ -37,17 +38,18 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export async function getDashboardData() {
-  const [ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, metrics] = await Promise.all([
+  const [ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics] = await Promise.all([
     request<Ambulance[]>('/ambulances'),
     request<Hospital[]>('/hospitals'),
     request<Incident[]>('/incidents'),
     request<Trip[]>('/trips'),
     request<DispatchAuditRecord[]>('/dispatch-decisions'),
     request<OutboxEvent[]>('/outbox-events'),
+    request<OutboxSummary>('/outbox-events/summary'),
     request<Metrics>('/metrics')
   ]);
 
-  return { ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, metrics };
+  return { ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics };
 }
 
 export function createIncident(payload: CreateIncidentPayload) {

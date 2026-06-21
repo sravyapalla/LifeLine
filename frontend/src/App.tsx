@@ -40,6 +40,7 @@ import type {
   Metrics,
   OutboxEvent,
   OutboxPublishResponse,
+  OutboxSummary,
   Trip,
   TripStatus
 } from './types';
@@ -53,6 +54,7 @@ interface DashboardState {
   trips: Trip[];
   dispatchDecisions: DispatchAuditRecord[];
   outboxEvents: OutboxEvent[];
+  outboxSummary: OutboxSummary;
   metrics: Metrics;
 }
 
@@ -249,7 +251,7 @@ export default function App() {
     <main className="shell">
       <header className="topbar">
         <div className="brand-block">
-          <p className="eyebrow">LifeLine V3</p>
+          <p className="eyebrow">LifeLine V4</p>
           <h1>Multi-Actor Emergency Workflow</h1>
         </div>
 
@@ -708,6 +710,7 @@ function ControlView({
         <OutboxPanel
           pending={data?.metrics.pendingOutboxEvents ?? 0}
           published={data?.metrics.publishedOutboxEvents ?? 0}
+          summary={data?.outboxSummary ?? null}
           lastPublish={lastOutboxPublish}
           onPublish={onPublishOutbox}
           busy={busy}
@@ -869,16 +872,23 @@ function DecisionResult({ decision }: { decision: DispatchResponse }) {
 function OutboxPanel({
   pending,
   published,
+  summary,
   lastPublish,
   onPublish,
   busy
 }: {
   pending: number;
   published: number;
+  summary: OutboxSummary | null;
   lastPublish: OutboxPublishResponse | null;
   onPublish: () => void;
   busy: boolean;
 }) {
+  const totalEvents = summary?.totalEvents ?? pending + published;
+  const oldestPending = summary?.oldestPendingAgeSeconds ? formatDuration(summary.oldestPendingAgeSeconds) : 'None';
+  const lastPublished = summary?.lastPublishedAt ? formatDateTime(summary.lastPublishedAt) : 'None';
+  const eventTypes = summary?.eventTypes ?? [];
+
   return (
     <div className="outbox-panel">
       <div className="panel-heading compact-heading">
@@ -889,9 +899,22 @@ function OutboxPanel({
         <ClipboardList size={18} />
       </div>
       <div className="outbox-stats">
+        <InfoLine label="Total" value={String(totalEvents)} />
         <InfoLine label="Pending" value={String(pending)} />
         <InfoLine label="Published" value={String(published)} />
+        <InfoLine label="Oldest Pending" value={oldestPending} />
+        <InfoLine label="Last Published" value={lastPublished} />
       </div>
+      {eventTypes.length > 0 && (
+        <div className="event-type-list">
+          {eventTypes.slice(0, 5).map((eventType) => (
+            <div className="event-type-row" key={eventType.eventType}>
+              <span>{eventType.eventType}</span>
+              <em>{eventType.pending} pending / {eventType.published} published</em>
+            </div>
+          ))}
+        </div>
+      )}
       <button className="ghost-button full-width" type="button" onClick={onPublish} disabled={busy || pending === 0}>
         Publish Pending
       </button>
@@ -1074,4 +1097,15 @@ function rolePath(role: Role) {
 
 function formatStatus(value: string) {
   return value.toLowerCase().split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function formatDuration(seconds: number) {
+  const safeSeconds = Math.max(0, seconds);
+  if (safeSeconds < 60) return `${safeSeconds}s`;
+  if (safeSeconds < 3600) return `${Math.floor(safeSeconds / 60)}m`;
+  return `${Math.floor(safeSeconds / 3600)}h ${Math.floor((safeSeconds % 3600) / 60)}m`;
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString();
 }

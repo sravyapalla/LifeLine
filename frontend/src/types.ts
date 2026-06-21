@@ -108,6 +108,23 @@ export interface OutboxEvent {
   publishedAt: string | null;
 }
 
+export interface OutboxEventTypeSummary {
+  eventType: string;
+  total: number;
+  pending: number;
+  published: number;
+}
+
+export interface OutboxSummary {
+  totalEvents: number;
+  pendingEvents: number;
+  publishedEvents: number;
+  oldestPendingAgeSeconds: number;
+  oldestPendingAt: string | null;
+  lastPublishedAt: string | null;
+  eventTypes: OutboxEventTypeSummary[];
+}
+
 export interface OutboxPublishResponse {
   published: number;
   pending: number;

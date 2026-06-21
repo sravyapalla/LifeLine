@@ -14,6 +14,8 @@ import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.outbox.OutboxProcessor;
 import com.lifeline.outbox.OutboxPublishResult;
+import com.lifeline.outbox.OutboxSummary;
+import com.lifeline.outbox.OutboxSummaryService;
 import com.lifeline.store.LifeLineStore;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -28,6 +30,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.util.List;
 
 @RestController
@@ -37,11 +40,18 @@ public class LifeLineController {
     private final LifeLineStore store;
     private final DispatchEngine dispatchEngine;
     private final OutboxProcessor outboxProcessor;
+    private final OutboxSummaryService outboxSummaryService;
 
-    public LifeLineController(LifeLineStore store, DispatchEngine dispatchEngine, OutboxProcessor outboxProcessor) {
+    public LifeLineController(
+            LifeLineStore store,
+            DispatchEngine dispatchEngine,
+            OutboxProcessor outboxProcessor,
+            OutboxSummaryService outboxSummaryService
+    ) {
         this.store = store;
         this.dispatchEngine = dispatchEngine;
         this.outboxProcessor = outboxProcessor;
+        this.outboxSummaryService = outboxSummaryService;
     }
 
     @GetMapping("/ambulances")
@@ -77,6 +87,11 @@ public class LifeLineController {
     @GetMapping("/outbox-events/pending")
     public List<OutboxEvent> pendingOutboxEvents() {
         return store.pendingOutboxEvents(50);
+    }
+
+    @GetMapping("/outbox-events/summary")
+    public OutboxSummary outboxSummary() {
+        return outboxSummaryService.summarize(store.outboxEvents(), Instant.now());
     }
 
     @GetMapping("/metrics")

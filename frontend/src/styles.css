@@ -765,6 +765,41 @@ button {
   margin-bottom: 10px;
 }
 
+.event-type-list {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.event-type-row {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.event-type-row span {
+  font-size: 12px;
+  font-weight: 900;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-type-row em {
+  color: #64748b;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .publish-note {
   color: #64748b;
   display: block;
@@ -878,5 +913,13 @@ button {
 
   .capacity-control {
     grid-template-columns: 1fr;
+  }
+
+  .event-type-row {
+    grid-template-columns: 1fr;
+  }
+
+  .event-type-row em {
+    white-space: normal;
   }
 }
