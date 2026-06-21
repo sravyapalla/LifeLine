@@ -144,6 +144,22 @@ class LifeLineSecurityApiTest {
     }
 
     @Test
+    void driverCanReadReceivingHospitalAvailabilityWithoutUnassignedIncidents() throws Exception {
+        String driverToken = login("driver.demo");
+
+        mockMvc.perform(get("/api/hospitals")
+                        .header("Authorization", bearer(driverToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id", notNullValue()))
+                .andExpect(jsonPath("$[0].availableBeds", notNullValue()));
+
+        mockMvc.perform(get("/api/incidents")
+                        .header("Authorization", bearer(driverToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()", is(0)));
+    }
+
+    @Test
     void hospitalCanUpdateOwnCapacityButNotAnotherHospital() throws Exception {
         String hospitalToken = login("hospital.demo");
 

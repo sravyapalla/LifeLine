@@ -1026,6 +1026,76 @@ button {
   min-width: 0;
 }
 
+.driver-unit {
+  display: grid;
+  gap: 10px;
+}
+
+.unit-card {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  min-height: 82px;
+  padding: 14px;
+}
+
+.unit-card h3,
+.unit-card p {
+  margin: 0;
+}
+
+.unit-card h3 {
+  font-size: 22px;
+}
+
+.unit-card p {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.driver-hospital-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.receiving-row {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 10px minmax(0, 1fr);
+  min-height: 58px;
+  padding: 10px;
+}
+
+.receiving-row.selected {
+  background: #fff7ed;
+  border-color: #fb923c;
+}
+
+.receiving-row strong,
+.receiving-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.receiving-row small {
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .trip-select {
   background: transparent;
   border: 0;

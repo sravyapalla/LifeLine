@@ -842,20 +842,37 @@ function DriverView({
   busy: boolean;
 }) {
   const selectedTrip = data?.trips.find((trip) => trip.id === selectedTripId) ?? null;
+  const ownAmbulance = data?.ambulances[0] ?? null;
+  const assignedTrips = data?.trips ?? [];
+  const receivingHospitals = data?.hospitals.filter((hospital) => hospital.availableBeds > 0) ?? [];
 
   return (
     <section className="role-layout driver-layout">
       <aside className="panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Fleet</p>
-            <h2>Ambulances</h2>
+            <p className="eyebrow">Driver</p>
+            <h2>My Unit</h2>
           </div>
           <AmbulanceIcon size={18} />
         </div>
 
-        <div className="resource-list">
-          {data?.ambulances.map((ambulance) => (
+        {ownAmbulance ? (
+          <DriverUnitPanel
+            ambulance={ownAmbulance}
+            liveLocation={data?.liveLocations.find((location) => location.ambulanceId === ownAmbulance.id) ?? null}
+            activeTrip={selectedTrip}
+            onMoveAmbulance={onMoveAmbulance}
+            busy={busy}
+          />
+        ) : (
+          <div className="empty-state">No ambulance assigned</div>
+        )}
+
+        {data && data.ambulances.length > 1 && (
+          <div className="resource-list bordered">
+            <h3>Nearby Units</h3>
+            {data.ambulances.slice(1, 4).map((ambulance) => (
             <LiveAmbulanceRow
               key={ambulance.id}
               ambulance={ambulance}
@@ -863,25 +880,27 @@ function DriverView({
               onMoveAmbulance={onMoveAmbulance}
               busy={busy}
             />
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </aside>
 
       <section className="panel wide-panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Driver</p>
-            <h2>Assigned Trips</h2>
+            <p className="eyebrow">Requests</p>
+            <h2>Patient Assignments</h2>
           </div>
-          <Navigation size={18} />
+          <span className="count">{assignedTrips.length}</span>
         </div>
 
+        {assignedTrips.length === 0 && <div className="empty-state">No assigned patient requests</div>}
         <div className="trip-grid">
-          {data?.trips.map((trip) => (
+          {assignedTrips.map((trip) => (
             <TripCard
               key={trip.id}
               trip={trip}
-              data={data}
+              data={data!}
               selected={trip.id === selectedTripId}
               onSelect={() => setSelectedTripId(trip.id)}
               actions={<DriverActions trip={trip} onTripStatus={onTripStatus} busy={busy} />}
@@ -893,11 +912,14 @@ function DriverView({
       <aside className="panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Route</p>
-            <h2>Trip Map</h2>
+            <p className="eyebrow">Receiving</p>
+            <h2>Hospitals</h2>
           </div>
-          <MapPin size={18} />
+          <HospitalIcon size={18} />
         </div>
+
+        <DriverHospitalPanel hospitals={receivingHospitals} selectedTrip={selectedTrip} />
+
         <MapPanel
           ambulances={data?.ambulances ?? []}
           liveLocations={data?.liveLocations ?? []}
@@ -910,6 +932,53 @@ function DriverView({
         />
       </aside>
     </section>
+  );
+}
+
+function DriverUnitPanel({
+  ambulance,
+  liveLocation,
+  activeTrip,
+  onMoveAmbulance,
+  busy
+}: {
+  ambulance: Ambulance;
+  liveLocation: AmbulanceLocationSnapshot | null;
+  activeTrip: Trip | null;
+  onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="driver-unit">
+      <div className="unit-card">
+        <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
+        <div>
+          <h3>{ambulance.callSign}</h3>
+          <p>{ambulance.type} - {formatStatus(ambulance.status)}</p>
+        </div>
+      </div>
+      <InfoLine label="Station" value={ambulance.baseStation} />
+      <InfoLine label="Location" value={liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : 'Base snapshot'} />
+      {activeTrip && <InfoLine label="Current Trip" value={activeTrip.id} />}
+      <LiveAmbulanceRow ambulance={ambulance} liveLocation={liveLocation} onMoveAmbulance={onMoveAmbulance} busy={busy} />
+    </div>
+  );
+}
+
+function DriverHospitalPanel({ hospitals, selectedTrip }: { hospitals: Hospital[]; selectedTrip: Trip | null }) {
+  return (
+    <div className="driver-hospital-list">
+      {hospitals.length === 0 && <div className="empty-state compact">No receiving capacity visible</div>}
+      {hospitals.slice(0, 5).map((hospital) => (
+        <article className={`receiving-row ${hospital.id === selectedTrip?.hospitalId ? 'selected' : ''}`} key={hospital.id}>
+          <span className={`resource-dot ${hospital.availableBeds > 0 ? 'available' : 'offline'}`} />
+          <span>
+            <strong>{hospital.name}</strong>
+            <small>{hospital.availableBeds}/{hospital.totalBeds} beds - {hospital.specialties.slice(0, 2).join(', ')}</small>
+          </span>
+        </article>
+      ))}
+    </div>
   );
 }
 
