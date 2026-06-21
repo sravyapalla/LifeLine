@@ -649,6 +649,8 @@ function PatientView({
   const selectedTrip = selectedIncident ? data?.trips.find((trip) => trip.incidentId === selectedIncident.id) ?? null : null;
   const assignedAmbulance = selectedTrip ? data?.ambulances.find((ambulance) => ambulance.id === selectedTrip.ambulanceId) : null;
   const receivingHospital = selectedTrip ? data?.hospitals.find((hospital) => hospital.id === selectedTrip.hospitalId) : null;
+  const availableAmbulances = data?.ambulances.filter((ambulance) => ambulance.status === 'AVAILABLE') ?? [];
+  const availableHospitals = data?.hospitals.filter((hospital) => hospital.availableBeds > 0) ?? [];
 
   return (
     <section className="role-layout patient-layout">
@@ -662,6 +664,8 @@ function PatientView({
         </div>
 
         <IncidentForm form={form} setForm={setForm} onSubmit={onCreateIncident} busy={busy} submitLabel="Request Ambulance" />
+
+        <PatientCoveragePanel ambulances={availableAmbulances} hospitals={availableHospitals} />
       </aside>
 
       <section className="map-stage">
@@ -693,6 +697,7 @@ function PatientView({
             <JourneySteps incident={selectedIncident} trip={selectedTrip ?? null} />
             {assignedAmbulance && <InfoLine label="Ambulance" value={`${assignedAmbulance.callSign} - ${assignedAmbulance.type}`} />}
             {receivingHospital && <InfoLine label="Hospital" value={receivingHospital.name} />}
+            {selectedTrip && <PatientTrackingPanel trip={selectedTrip} ambulance={assignedAmbulance ?? null} hospital={receivingHospital ?? null} />}
           </div>
         ) : (
           <div className="empty-state">No active request</div>
@@ -717,6 +722,63 @@ function PatientView({
         </div>
       </aside>
     </section>
+  );
+}
+
+function PatientCoveragePanel({ ambulances, hospitals }: { ambulances: Ambulance[]; hospitals: Hospital[] }) {
+  return (
+    <div className="coverage-panel">
+      <div className="panel-heading compact-heading">
+        <div>
+          <p className="eyebrow">Coverage</p>
+          <h3>Available Now</h3>
+        </div>
+        <MapPin size={18} />
+      </div>
+
+      <div className="coverage-grid">
+        <article>
+          <strong>{ambulances.length}</strong>
+          <span>Ambulances</span>
+        </article>
+        <article>
+          <strong>{hospitals.length}</strong>
+          <span>Hospitals</span>
+        </article>
+      </div>
+
+      <div className="coverage-list">
+        {ambulances.slice(0, 3).map((ambulance) => (
+          <div className="coverage-row" key={ambulance.id}>
+            <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
+            <span>
+              <strong>{ambulance.callSign}</strong>
+              <small>{ambulance.type} - {ambulance.baseStation}</small>
+            </span>
+          </div>
+        ))}
+        {hospitals.slice(0, 3).map((hospital) => (
+          <div className="coverage-row" key={hospital.id}>
+            <span className={`resource-dot ${hospital.availableBeds > 0 ? 'available' : 'offline'}`} />
+            <span>
+              <strong>{hospital.name}</strong>
+              <small>{hospital.availableBeds} beds - {hospital.specialties.slice(0, 2).join(', ')}</small>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PatientTrackingPanel({ trip, ambulance, hospital }: { trip: Trip; ambulance: Ambulance | null; hospital: Hospital | null }) {
+  return (
+    <div className="tracking-panel">
+      <InfoLine label="Pickup ETA" value={`${trip.pickupEtaMinutes} min`} />
+      <InfoLine label="Transfer ETA" value={`${trip.hospitalEtaMinutes} min`} />
+      {ambulance && <InfoLine label="Unit" value={ambulance.callSign} />}
+      {hospital && <InfoLine label="Receiving" value={hospital.name} />}
+    </div>
   );
 }
 
