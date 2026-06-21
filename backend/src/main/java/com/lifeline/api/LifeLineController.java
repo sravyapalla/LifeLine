@@ -149,12 +149,16 @@ public class LifeLineController {
         List<Ambulance> ambulances = ambulanceLocationProjection.applyTo(store.ambulances());
         List<Hospital> hospitals = store.hospitals();
         List<Trip> trips = store.trips();
+        List<SimulationResult> simulations = store.simulations();
 
         double averageBedAvailability = hospitals.stream()
                 .mapToDouble(hospital -> hospital.totalBeds() == 0 ? 0 : (double) hospital.availableBeds() / hospital.totalBeds())
                 .average()
                 .orElse(0);
         List<OutboxEvent> outboxEvents = store.outboxEvents();
+        int failedOutboxEvents = (int) outboxEvents.stream()
+                .filter(event -> event.publishedAt() == null && event.lastPublishError() != null)
+                .count();
 
         return new MetricsResponse(
                 (int) incidents.stream().filter(incident -> incident.status() == IncidentStatus.NEW).count(),
@@ -164,7 +168,12 @@ public class LifeLineController {
                 Math.round(averageBedAvailability * 1000.0) / 10.0,
                 (int) outboxEvents.stream().filter(event -> event.publishedAt() == null).count(),
                 (int) outboxEvents.stream().filter(event -> event.publishedAt() != null).count(),
-                (int) outboxEvents.stream().filter(event -> event.publishedAt() == null && event.lastPublishError() != null).count()
+                failedOutboxEvents,
+                failedOutboxEvents,
+                ambulanceLocationProjection.snapshots().size(),
+                store.notificationBacklog(),
+                simulations.size(),
+                latestOptimizationImprovement(simulations)
         );
     }
 
@@ -303,5 +312,14 @@ public class LifeLineController {
         } catch (IllegalArgumentException exception) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unsupported notification role.");
         }
+    }
+
+    private double latestOptimizationImprovement(List<SimulationResult> simulations) {
+        return simulations.stream()
+                .flatMap(simulation -> simulation.strategyResults().stream())
+                .filter(result -> result.improvementPercent() > 0)
+                .findFirst()
+                .map(result -> Math.round(result.improvementPercent() * 10.0) / 10.0)
+                .orElse(0.0);
     }
 }

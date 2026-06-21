@@ -92,6 +92,11 @@ export interface Metrics {
   pendingOutboxEvents: number;
   publishedOutboxEvents: number;
   failedOutboxEvents: number;
+  kafkaPublishFailures: number;
+  liveAmbulanceLocations: number;
+  notificationBacklog: number;
+  simulationRuns: number;
+  latestOptimizationImprovementPercent: number;
 }
 
 export interface DispatchAuditRecord {

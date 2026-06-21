@@ -439,9 +439,9 @@ Current APIs:
 
 V2 keeps the original APIs stable where possible, V3 adds role workflow actions for trips, hospital capacity, and rerouting, V4 adds outbox processing and health operations, and V5 adds live location, notifications, and simulation APIs. The V4/V5 publish response reports `published`, `failed`, and remaining `pending` events.
 
-## V4 Reliability Configuration
+## V4/V5 Reliability Configuration
 
-Default publishing uses a local logging adapter:
+V4 introduced the local logging/failure adapters for retry demos:
 
 ```yaml
 lifeline:
@@ -462,6 +462,30 @@ The publisher modes are:
 - `logging`: records a successful local publish in backend logs
 - `fail-all`: fails every publish attempt
 - `fail-event-type`: fails only events matching `lifeline.outbox.publisher.fail-event-type`
+- `kafka`: publishes `OutboxEventEnvelope` JSON to Kafka topic `lifeline.outbox.events`
+
+V5 full runtime defaults to Kafka publishing and Redis live-location projection:
+
+```yaml
+lifeline:
+  outbox:
+    publisher:
+      mode: kafka
+  kafka:
+    outbox-topic: lifeline.outbox.events
+    publish-timeout-seconds: 5
+  live-location:
+    ttl-seconds: 180
+```
+
+The `memory` Spring profile remains available for lightweight demos and tests. It keeps outbox publishing in logging mode and uses in-memory live ambulance locations instead of Redis.
+
+V5 simulation rules:
+
+- `GREEDY_SEQUENTIAL` mirrors the current dispatch behavior.
+- `GLOBAL_MIN_COST` performs bounded exact optimization for up to 12 incidents.
+- Requests with `strategy=GLOBAL_MIN_COST` and more than 12 incidents are rejected.
+- Simulation runs and assignments are persisted in `simulation_runs` and `simulation_assignments`.
 
 The PostgreSQL outbox integration test is opt-in because it requires Docker:
 

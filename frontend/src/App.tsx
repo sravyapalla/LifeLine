@@ -364,6 +364,11 @@ export default function App() {
         <MetricCard icon={<Route size={18} />} label="Active Trips" value={activeTrips.length} tone="blue" />
         <MetricCard icon={<Bed size={18} />} label="Bed Avg" value={`${metrics?.averageBedAvailabilityPercent ?? 0}%`} tone="amber" />
         <MetricCard icon={<ClipboardList size={18} />} label="Pending Events" value={metrics?.pendingOutboxEvents ?? 0} tone="violet" />
+        <MetricCard icon={<Activity size={18} />} label="Sim Runs" value={metrics?.simulationRuns ?? data?.simulations.length ?? 0} tone="blue" />
+        <MetricCard icon={<Route size={18} />} label="Opt Gain" value={`${metrics?.latestOptimizationImprovementPercent ?? 0}%`} tone="green" />
+        <MetricCard icon={<MapPin size={18} />} label="Live Locs" value={metrics?.liveAmbulanceLocations ?? 0} tone="amber" />
+        <MetricCard icon={<BellPlus size={18} />} label="Notify" value={metrics?.notificationBacklog ?? 0} tone="red" />
+        <MetricCard icon={<RadioTower size={18} />} label="Kafka Fail" value={metrics?.kafkaPublishFailures ?? 0} tone="violet" />
       </section>
 
       <NotificationPanel
