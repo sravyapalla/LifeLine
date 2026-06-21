@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: lifeline-audit-service
+
+server:
+  port: 8095
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+lifeline:
+  service:
+    name: audit
+    domain: trust
+    responsibility: Immutable security and workflow audit event storage and retrieval.
+    owns:
+      - security audit events
+      - denied access reasons
+      - sensitive workflow action history
+    consumes:
+      - auth.access_decision
+      - workflow.action
+    publishes:
+      - audit.recorded
+    public-apis:
+      - GET /api/audit-events
+    dependencies:
+      - PostgreSQL/PostGIS

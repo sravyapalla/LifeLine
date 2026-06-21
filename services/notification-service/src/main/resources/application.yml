@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: lifeline-notification-service
+
+server:
+  port: 8094
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+lifeline:
+  service:
+    name: notification
+    domain: communications
+    responsibility: Role-targeted notifications, acknowledgements, and future SMS/email/push adapters.
+    owns:
+      - notifications
+      - notification acknowledgement state
+      - delivery adapter contracts
+    consumes:
+      - outbox.workflow_events
+    publishes:
+      - notification.created
+      - notification.acknowledged
+    public-apis:
+      - GET /api/notifications?role={role}
+      - POST /api/notifications/{id}/ack
+    dependencies:
+      - Kafka
+      - PostgreSQL/PostGIS
+      - audit-service

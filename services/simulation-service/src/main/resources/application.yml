@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: lifeline-simulation-service
+
+server:
+  port: 8096
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+lifeline:
+  service:
+    name: simulation
+    domain: planning
+    responsibility: Surge generation, deterministic replay, and greedy versus global optimization comparison.
+    owns:
+      - simulation runs
+      - simulation assignments
+      - optimization comparison results
+    consumes:
+      - resource.snapshot
+      - dispatch.strategy
+    publishes:
+      - simulation.completed
+    public-apis:
+      - POST /api/simulations
+      - GET /api/simulations
+      - GET /api/simulations/{id}
+    dependencies:
+      - PostgreSQL/PostGIS
+      - dispatch-service
+      - resource-service

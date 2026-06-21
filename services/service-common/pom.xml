@@ -11,9 +11,9 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>lifeline-gateway-service</artifactId>
-    <name>LifeLine Gateway Service</name>
-    <description>Browser-facing gateway for LifeLine services</description>
+    <artifactId>lifeline-service-common</artifactId>
+    <name>LifeLine Service Common</name>
+    <description>Shared service metadata contract for LifeLine microservices</description>
 
     <dependencies>
         <dependency>
@@ -28,19 +28,5 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
-
-    <build>
-        <plugins>
-            <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-            </plugin>
-        </plugins>
-    </build>
 </project>
