@@ -8,6 +8,11 @@ public record MetricsResponse(
         double averageBedAvailabilityPercent,
         int pendingOutboxEvents,
         int publishedOutboxEvents,
-        int failedOutboxEvents
+        int failedOutboxEvents,
+        int kafkaPublishFailures,
+        int liveAmbulanceLocations,
+        int notificationBacklog,
+        int simulationRuns,
+        double latestOptimizationImprovementPercent
 ) {
 }

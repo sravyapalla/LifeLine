@@ -11,9 +11,12 @@ import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentPriority;
 import com.lifeline.domain.IncidentStatus;
 import com.lifeline.domain.Location;
+import com.lifeline.domain.Notification;
+import com.lifeline.domain.NotificationRole;
 import com.lifeline.domain.OutboxEvent;
 import com.lifeline.domain.Trip;
 import com.lifeline.domain.TripStatus;
+import com.lifeline.simulation.SimulationResult;
 import jakarta.annotation.PostConstruct;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
@@ -37,6 +40,8 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     private final Map<String, Trip> trips = new LinkedHashMap<>();
     private final List<DispatchAuditRecord> dispatchDecisions = new ArrayList<>();
     private final List<OutboxEvent> outboxEvents = new ArrayList<>();
+    private final List<Notification> notifications = new ArrayList<>();
+    private final List<SimulationResult> simulations = new ArrayList<>();
 
     @PostConstruct
     public void seed() {
@@ -50,6 +55,8 @@ public class InMemoryLifeLineStore implements LifeLineStore {
         trips.clear();
         dispatchDecisions.clear();
         outboxEvents.clear();
+        notifications.clear();
+        simulations.clear();
 
         addAmbulance(new Ambulance("AMB-101", "Aster Alpha", AmbulanceType.ALS, AmbulanceStatus.AVAILABLE, new Location(12.9719, 77.6412), "Indiranagar"));
         addAmbulance(new Ambulance("AMB-102", "Pulse Bravo", AmbulanceType.BLS, AmbulanceStatus.AVAILABLE, new Location(12.9352, 77.6245), "Koramangala"));
@@ -99,6 +106,21 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     }
 
     @Override
+    public synchronized List<Notification> notifications(NotificationRole role) {
+        return notifications.stream()
+                .filter(notification -> notification.role() == role)
+                .sorted(Comparator.comparing(Notification::createdAt).reversed())
+                .toList();
+    }
+
+    @Override
+    public synchronized List<SimulationResult> simulations() {
+        return simulations.stream()
+                .sorted(Comparator.comparing(SimulationResult::createdAt).reversed())
+                .toList();
+    }
+
+    @Override
     public synchronized List<OutboxEvent> pendingOutboxEvents(int limit) {
         return outboxEvents.stream()
                 .filter(event -> event.publishedAt() == null)
@@ -129,6 +151,13 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     }
 
     @Override
+    public synchronized int notificationBacklog() {
+        return (int) notifications.stream()
+                .filter(Notification::unread)
+                .count();
+    }
+
+    @Override
     public synchronized Optional<Incident> findIncident(String id) {
         return Optional.ofNullable(incidents.get(id));
     }
@@ -146,6 +175,13 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     @Override
     public synchronized Optional<Trip> findTrip(String id) {
         return Optional.ofNullable(trips.get(id));
+    }
+
+    @Override
+    public synchronized Optional<SimulationResult> findSimulation(String id) {
+        return simulations.stream()
+                .filter(simulation -> simulation.id().equals(id))
+                .findFirst();
     }
 
     public synchronized Incident saveIncident(Incident incident) {
@@ -350,6 +386,32 @@ public class InMemoryLifeLineStore implements LifeLineStore {
                 .findFirst()
                 .map(event -> event.failedWith(failureReason))
                 .ifPresent(this::replaceOutboxEvent);
+    }
+
+    @Override
+    public synchronized Notification addNotification(Notification notification) {
+        notifications.addFirst(notification);
+        return notification;
+    }
+
+    @Override
+    public synchronized Notification acknowledgeNotification(String notificationId) {
+        Instant acknowledgedAt = Instant.now();
+        for (int index = 0; index < notifications.size(); index += 1) {
+            Notification notification = notifications.get(index);
+            if (notification.id().equals(notificationId)) {
+                Notification updated = notification.acknowledged(acknowledgedAt);
+                notifications.set(index, updated);
+                return updated;
+            }
+        }
+        throw new IllegalStateException("Notification not found.");
+    }
+
+    @Override
+    public synchronized SimulationResult saveSimulationResult(SimulationResult result) {
+        simulations.addFirst(result);
+        return result;
     }
 
     private void addAmbulance(Ambulance ambulance) {

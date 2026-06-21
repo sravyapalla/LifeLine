@@ -9,6 +9,7 @@ import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentPriority;
 import com.lifeline.domain.IncidentStatus;
 import com.lifeline.domain.Location;
+import com.lifeline.routing.StraightLineRoutingProvider;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -18,7 +19,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class DispatchEngineTest {
-    private final DispatchEngine engine = new DispatchEngine(32, 28);
+    private final DispatchEngine engine = new DispatchEngine(new StraightLineRoutingProvider(), 32, 28);
 
     @Test
     void choosesCompatibleAmbulanceAndHospitalForCardiacIncident() {

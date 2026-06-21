@@ -2,6 +2,10 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Activity,
   Ambulance as AmbulanceIcon,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
   Bed,
   BellPlus,
   CheckCircle2,
@@ -19,17 +23,21 @@ import {
 } from 'lucide-react';
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet';
 import {
+  acknowledgeNotification,
   createIncident,
   dispatchIncident,
   getDashboardData,
   publishOutboxEvents,
   rerouteTrip,
   resetDemo,
+  runSimulation,
+  updateAmbulanceLocation,
   updateHospitalCapacity,
   updateTripStatus
 } from './api';
 import type {
   Ambulance,
+  AmbulanceLocationSnapshot,
   CreateIncidentPayload,
   DispatchAuditRecord,
   DispatchResponse,
@@ -38,17 +46,24 @@ import type {
   Incident,
   IncidentPriority,
   Metrics,
+  Notification,
+  OptimizationStrategy,
   OutboxEvent,
   OutboxPublishResponse,
   OutboxSummary,
+  SimulationAssignment,
+  SimulationRequestPayload,
+  SimulationResult,
+  SimulationStrategyResult,
   Trip,
   TripStatus
 } from './types';
 
-type Role = 'patient' | 'driver' | 'hospital' | 'control';
+type Role = 'patient' | 'driver' | 'hospital' | 'control' | 'simulation';
 
 interface DashboardState {
   ambulances: Ambulance[];
+  liveLocations: AmbulanceLocationSnapshot[];
   hospitals: Hospital[];
   incidents: Incident[];
   trips: Trip[];
@@ -56,6 +71,8 @@ interface DashboardState {
   outboxEvents: OutboxEvent[];
   outboxSummary: OutboxSummary;
   metrics: Metrics;
+  notifications: Notification[];
+  simulations: SimulationResult[];
 }
 
 const initialIncident: CreateIncidentPayload = {
@@ -69,15 +86,26 @@ const initialIncident: CreateIncidentPayload = {
 
 const conditions: EmergencyCondition[] = ['CARDIAC', 'TRAUMA', 'PEDIATRIC', 'STROKE', 'GENERAL'];
 const priorities: IncidentPriority[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+const strategies: OptimizationStrategy[] = ['GREEDY_SEQUENTIAL', 'GLOBAL_MIN_COST'];
 
 const roles: { id: Role; label: string; icon: ReactNode }[] = [
   { id: 'patient', label: 'Patient', icon: <UserRound size={17} /> },
   { id: 'driver', label: 'Driver', icon: <AmbulanceIcon size={17} /> },
   { id: 'hospital', label: 'Hospital', icon: <HospitalIcon size={17} /> },
-  { id: 'control', label: 'Control', icon: <RadioTower size={17} /> }
+  { id: 'control', label: 'Control', icon: <RadioTower size={17} /> },
+  { id: 'simulation', label: 'Simulation', icon: <Activity size={17} /> }
 ];
 
 const activeTripStatuses: TripStatus[] = ['RESERVED', 'EN_ROUTE_PATIENT', 'EN_ROUTE_HOSPITAL'];
+const initialSimulationRequest: SimulationRequestPayload = {
+  incidentCount: 6,
+  randomSeed: 20260621,
+  criticalRatio: 0.35,
+  ambulanceOutages: [],
+  exhaustedHospitals: [],
+  capacityStressPercent: 15,
+  strategy: 'GLOBAL_MIN_COST'
+};
 
 export default function App() {
   const [role, setRole] = useState<Role>(() => roleFromPath(window.location.pathname));
@@ -88,13 +116,16 @@ export default function App() {
   const [capacityDrafts, setCapacityDrafts] = useState<Record<string, number>>({});
   const [lastDecision, setLastDecision] = useState<DispatchResponse | null>(null);
   const [lastOutboxPublish, setLastOutboxPublish] = useState<OutboxPublishResponse | null>(null);
+  const [simulationForm, setSimulationForm] = useState<SimulationRequestPayload>(initialSimulationRequest);
+  const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   async function load() {
     setError('');
-    const nextData = await getDashboardData();
+    const nextData = await getDashboardData(notificationRoleFor(role));
     setData(nextData);
+    setSimulationResult((current) => current ?? nextData.simulations[0] ?? null);
     setCapacityDrafts(Object.fromEntries(nextData.hospitals.map((hospital) => [hospital.id, hospital.availableBeds])));
     setSelectedIncidentId((current) => {
       if (nextData.incidents.some((incident) => incident.id === current)) return current;
@@ -110,7 +141,7 @@ export default function App() {
 
   useEffect(() => {
     load().catch((loadError: Error) => setError(loadError.message));
-  }, []);
+  }, [role]);
 
   useEffect(() => {
     function syncPath() {
@@ -196,6 +227,22 @@ export default function App() {
     }
   }
 
+  async function handleMoveAmbulance(ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) {
+    setBusy(true);
+    setError('');
+    try {
+      await updateAmbulanceLocation(ambulance.id, {
+        latitude: Number((ambulance.location.latitude + deltaLatitude).toFixed(5)),
+        longitude: Number((ambulance.location.longitude + deltaLongitude).toFixed(5))
+      });
+      await load();
+    } catch (locationError) {
+      setError((locationError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleReroute(tripId: string) {
     setBusy(true);
     setError('');
@@ -227,6 +274,34 @@ export default function App() {
     }
   }
 
+  async function handleAcknowledgeNotification(notificationId: string) {
+    setBusy(true);
+    setError('');
+    try {
+      await acknowledgeNotification(notificationId);
+      await load();
+    } catch (notificationError) {
+      setError((notificationError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRunSimulation() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await runSimulation(simulationForm);
+      setSimulationResult(result);
+      await load();
+      navigateRole('simulation');
+    } catch (simulationError) {
+      setError((simulationError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleReset() {
     setBusy(true);
     setError('');
@@ -234,6 +309,7 @@ export default function App() {
       await resetDemo();
       setLastDecision(null);
       setLastOutboxPublish(null);
+      setSimulationResult(null);
       setSelectedIncidentId('');
       setSelectedTripId('');
       await load();
@@ -251,8 +327,8 @@ export default function App() {
     <main className="shell">
       <header className="topbar">
         <div className="brand-block">
-          <p className="eyebrow">LifeLine V4</p>
-          <h1>Multi-Actor Emergency Workflow</h1>
+          <p className="eyebrow">LifeLine V5</p>
+          <h1>Ops Simulator</h1>
         </div>
 
         <nav className="role-tabs" aria-label="Role navigation">
@@ -288,7 +364,19 @@ export default function App() {
         <MetricCard icon={<Route size={18} />} label="Active Trips" value={activeTrips.length} tone="blue" />
         <MetricCard icon={<Bed size={18} />} label="Bed Avg" value={`${metrics?.averageBedAvailabilityPercent ?? 0}%`} tone="amber" />
         <MetricCard icon={<ClipboardList size={18} />} label="Pending Events" value={metrics?.pendingOutboxEvents ?? 0} tone="violet" />
+        <MetricCard icon={<Activity size={18} />} label="Sim Runs" value={metrics?.simulationRuns ?? data?.simulations.length ?? 0} tone="blue" />
+        <MetricCard icon={<Route size={18} />} label="Opt Gain" value={`${metrics?.latestOptimizationImprovementPercent ?? 0}%`} tone="green" />
+        <MetricCard icon={<MapPin size={18} />} label="Live Locs" value={metrics?.liveAmbulanceLocations ?? 0} tone="amber" />
+        <MetricCard icon={<BellPlus size={18} />} label="Notify" value={metrics?.notificationBacklog ?? 0} tone="red" />
+        <MetricCard icon={<RadioTower size={18} />} label="Kafka Fail" value={metrics?.kafkaPublishFailures ?? 0} tone="violet" />
       </section>
+
+      <NotificationPanel
+        notifications={data?.notifications ?? []}
+        role={role}
+        onAcknowledge={handleAcknowledgeNotification}
+        busy={busy}
+      />
 
       {role === 'patient' && (
         <PatientView
@@ -308,6 +396,7 @@ export default function App() {
           selectedTripId={selectedTripId}
           setSelectedTripId={setSelectedTripId}
           onTripStatus={handleTripStatus}
+          onMoveAmbulance={handleMoveAmbulance}
           busy={busy}
         />
       )}
@@ -334,9 +423,22 @@ export default function App() {
           setSelectedTripId={setSelectedTripId}
           onDispatch={handleDispatch}
           onReroute={handleReroute}
+          onMoveAmbulance={handleMoveAmbulance}
           onPublishOutbox={handlePublishOutbox}
           lastDecision={lastDecision}
           lastOutboxPublish={lastOutboxPublish}
+          busy={busy}
+        />
+      )}
+
+      {role === 'simulation' && (
+        <SimulationView
+          data={data}
+          request={simulationForm}
+          setRequest={setSimulationForm}
+          result={simulationResult}
+          setResult={setSimulationResult}
+          onRun={handleRunSimulation}
           busy={busy}
         />
       )}
@@ -383,6 +485,7 @@ function PatientView({
       <section className="map-stage">
         <MapPanel
           ambulances={data?.ambulances ?? []}
+          liveLocations={data?.liveLocations ?? []}
           hospitals={data?.hospitals ?? []}
           incidents={data?.incidents ?? []}
           trips={data?.trips ?? []}
@@ -435,17 +538,63 @@ function PatientView({
   );
 }
 
+function NotificationPanel({
+  notifications,
+  role,
+  onAcknowledge,
+  busy
+}: {
+  notifications: Notification[];
+  role: Role;
+  onAcknowledge: (notificationId: string) => void;
+  busy: boolean;
+}) {
+  const unread = notifications.filter((notification) => !notification.acknowledgedAt);
+
+  return (
+    <section className="notification-panel" aria-label={`${role} notifications`}>
+      <div className="notification-heading">
+        <span><BellPlus size={16} /></span>
+        <strong>{formatStatus(role)} Notifications</strong>
+        <em>{unread.length} unread</em>
+      </div>
+      <div className="notification-list">
+        {notifications.length === 0 && <div className="empty-state compact">No notifications</div>}
+        {notifications.slice(0, 4).map((notification) => (
+          <article className={`notification-item ${notification.acknowledgedAt ? 'read' : ''}`} key={notification.id}>
+            <div>
+              <strong>{notification.title}</strong>
+              <small>{notification.message}</small>
+              <small>{notification.eventType} - {formatRelativeTime(notification.createdAt)}</small>
+            </div>
+            <button
+              className="ghost-button"
+              type="button"
+              onClick={() => onAcknowledge(notification.id)}
+              disabled={busy || Boolean(notification.acknowledgedAt)}
+            >
+              Ack
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function DriverView({
   data,
   selectedTripId,
   setSelectedTripId,
   onTripStatus,
+  onMoveAmbulance,
   busy
 }: {
   data: DashboardState | null;
   selectedTripId: string;
   setSelectedTripId: (id: string) => void;
   onTripStatus: (tripId: string, status: TripStatus) => void;
+  onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
   busy: boolean;
 }) {
   const selectedTrip = data?.trips.find((trip) => trip.id === selectedTripId) ?? null;
@@ -463,11 +612,13 @@ function DriverView({
 
         <div className="resource-list">
           {data?.ambulances.map((ambulance) => (
-            <div className="resource-row" key={ambulance.id}>
-              <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
-              <span>{ambulance.callSign}</span>
-              <em>{formatStatus(ambulance.status)}</em>
-            </div>
+            <LiveAmbulanceRow
+              key={ambulance.id}
+              ambulance={ambulance}
+              liveLocation={data.liveLocations.find((location) => location.ambulanceId === ambulance.id) ?? null}
+              onMoveAmbulance={onMoveAmbulance}
+              busy={busy}
+            />
           ))}
         </div>
       </aside>
@@ -505,6 +656,7 @@ function DriverView({
         </div>
         <MapPanel
           ambulances={data?.ambulances ?? []}
+          liveLocations={data?.liveLocations ?? []}
           hospitals={data?.hospitals ?? []}
           incidents={data?.incidents ?? []}
           trips={data?.trips ?? []}
@@ -595,6 +747,7 @@ function ControlView({
   setSelectedTripId,
   onDispatch,
   onReroute,
+  onMoveAmbulance,
   onPublishOutbox,
   lastDecision,
   lastOutboxPublish,
@@ -609,6 +762,7 @@ function ControlView({
   setSelectedTripId: (id: string) => void;
   onDispatch: (incidentId?: string) => void;
   onReroute: (tripId: string) => void;
+  onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
   onPublishOutbox: () => void;
   lastDecision: DispatchResponse | null;
   lastOutboxPublish: OutboxPublishResponse | null;
@@ -665,6 +819,7 @@ function ControlView({
       <section className="map-stage">
         <MapPanel
           ambulances={data?.ambulances ?? []}
+          liveLocations={data?.liveLocations ?? []}
           hospitals={data?.hospitals ?? []}
           incidents={data?.incidents ?? []}
           trips={data?.trips ?? []}
@@ -707,6 +862,19 @@ function ControlView({
 
         {lastDecision && <DecisionResult decision={lastDecision} />}
 
+        <div className="compact-list bordered">
+          <h3>Live Fleet</h3>
+          {data?.ambulances.slice(0, 4).map((ambulance) => (
+            <LiveAmbulanceRow
+              key={ambulance.id}
+              ambulance={ambulance}
+              liveLocation={data.liveLocations.find((location) => location.ambulanceId === ambulance.id) ?? null}
+              onMoveAmbulance={onMoveAmbulance}
+              busy={busy}
+            />
+          ))}
+        </div>
+
         <OutboxPanel
           pending={data?.metrics.pendingOutboxEvents ?? 0}
           published={data?.metrics.publishedOutboxEvents ?? 0}
@@ -720,6 +888,234 @@ function ControlView({
         <Timeline events={data?.outboxEvents ?? []} decisions={data?.dispatchDecisions ?? []} />
       </aside>
     </section>
+  );
+}
+
+function SimulationView({
+  data,
+  request,
+  setRequest,
+  result,
+  setResult,
+  onRun,
+  busy
+}: {
+  data: DashboardState | null;
+  request: SimulationRequestPayload;
+  setRequest: (request: SimulationRequestPayload) => void;
+  result: SimulationResult | null;
+  setResult: (result: SimulationResult | null) => void;
+  onRun: () => void;
+  busy: boolean;
+}) {
+  const greedy = result?.strategyResults.find((candidate) => candidate.strategy === 'GREEDY_SEQUENTIAL') ?? null;
+  const global = result?.strategyResults.find((candidate) => candidate.strategy === 'GLOBAL_MIN_COST') ?? null;
+  const selectedStrategy = global ?? greedy;
+  const simulatedIncidents: Incident[] = (selectedStrategy?.assignments ?? []).map((assignment) => ({
+    id: assignment.incidentId,
+    patientName: assignment.incidentId,
+    phone: '+91-90000-SIM',
+    condition: assignment.condition,
+    priority: assignment.priority,
+    location: assignment.incidentLocation,
+    createdAt: result?.createdAt ?? new Date().toISOString(),
+    status: assignment.matched ? 'ASSIGNED' : 'NEW'
+  }));
+  const unmatched = selectedStrategy?.assignments.filter((assignment) => !assignment.matched) ?? [];
+
+  return (
+    <section className="simulation-layout">
+      <aside className="panel simulation-controls">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Scenario</p>
+            <h2>Ops Simulator</h2>
+          </div>
+          <Activity size={18} />
+        </div>
+
+        <div className="create-form open">
+          <label>
+            Incidents
+            <input type="number" min={1} max={40} value={request.incidentCount} onChange={(event) => setRequest({ ...request, incidentCount: Number(event.target.value) })} />
+          </label>
+          <label>
+            Seed
+            <input type="number" value={request.randomSeed} onChange={(event) => setRequest({ ...request, randomSeed: Number(event.target.value) })} />
+          </label>
+          <label>
+            Critical Ratio
+            <input type="range" min={0} max={1} step={0.05} value={request.criticalRatio} onChange={(event) => setRequest({ ...request, criticalRatio: Number(event.target.value) })} />
+            <small>{Math.round(request.criticalRatio * 100)}%</small>
+          </label>
+          <label>
+            Capacity Stress
+            <input type="range" min={0} max={100} step={5} value={request.capacityStressPercent} onChange={(event) => setRequest({ ...request, capacityStressPercent: Number(event.target.value) })} />
+            <small>{request.capacityStressPercent}%</small>
+          </label>
+          <label>
+            Exact Strategy
+            <select value={request.strategy} onChange={(event) => setRequest({ ...request, strategy: event.target.value as OptimizationStrategy })}>
+              {strategies.map((strategy) => <option key={strategy} value={strategy}>{formatStrategy(strategy)}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <SelectorGroup
+          title="Ambulance Outages"
+          items={data?.ambulances.map((ambulance) => ({ id: ambulance.id, label: ambulance.callSign })) ?? []}
+          selected={request.ambulanceOutages}
+          onToggle={(id) => setRequest({ ...request, ambulanceOutages: toggleSelection(request.ambulanceOutages, id) })}
+        />
+
+        <SelectorGroup
+          title="Exhausted Hospitals"
+          items={data?.hospitals.map((hospital) => ({ id: hospital.id, label: hospital.name })) ?? []}
+          selected={request.exhaustedHospitals}
+          onToggle={(id) => setRequest({ ...request, exhaustedHospitals: toggleSelection(request.exhaustedHospitals, id) })}
+        />
+
+        <button className="primary-button" type="button" onClick={onRun} disabled={busy}>
+          Run Simulation
+        </button>
+      </aside>
+
+      <section className="simulation-main">
+        <div className="comparison-grid">
+          {greedy && <StrategyCard result={greedy} />}
+          {global && <StrategyCard result={global} />}
+          {!result && <div className="empty-state">Run a scenario to compare dispatch strategies</div>}
+        </div>
+
+        <div className="simulation-map">
+          <MapPanel
+            ambulances={data?.ambulances ?? []}
+            liveLocations={data?.liveLocations ?? []}
+            hospitals={data?.hospitals ?? []}
+            incidents={simulatedIncidents}
+            trips={[]}
+            selectedIncidentId={simulatedIncidents[0]?.id ?? ''}
+            selectedTripId=""
+            compact
+          />
+        </div>
+
+        <AssignmentTable result={selectedStrategy} />
+      </section>
+
+      <aside className="panel simulation-side">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">History</p>
+            <h2>Runs</h2>
+          </div>
+          <ClipboardList size={18} />
+        </div>
+
+        <select className="history-select" value={result?.id ?? ''} onChange={(event) => setResult(data?.simulations.find((simulation) => simulation.id === event.target.value) ?? null)}>
+          <option value="">Select run</option>
+          {data?.simulations.map((simulation) => (
+            <option key={simulation.id} value={simulation.id}>{simulation.id} - {formatDateTime(simulation.createdAt)}</option>
+          ))}
+        </select>
+
+        <div className="compact-list bordered">
+          <h3>Unmatched</h3>
+          {unmatched.length === 0 && <div className="empty-state compact">No unmatched incidents</div>}
+          {unmatched.map((assignment) => (
+            <div className="incoming-row" key={assignment.incidentId}>
+              <div>
+                <strong>{assignment.incidentId}</strong>
+                <small>{assignment.condition} - {assignment.priority}</small>
+                <small>{assignment.reason}</small>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="timeline">
+          <h3>Playback</h3>
+          {(selectedStrategy?.assignments ?? []).slice(0, 8).map((assignment, index) => (
+            <div className="timeline-row" key={`${assignment.strategy}-${assignment.incidentId}`}>
+              <span />
+              <div>
+                <strong>{index + 1}. {assignment.incidentId}</strong>
+                <small>{assignment.matched ? `${assignment.ambulanceId} to ${assignment.hospitalId}` : 'Unmatched'}</small>
+                <small>{assignment.matched ? `${assignment.pickupEtaMinutes} min pickup` : assignment.reason}</small>
+              </div>
+            </div>
+          ))}
+        </div>
+      </aside>
+    </section>
+  );
+}
+
+function SelectorGroup({
+  title,
+  items,
+  selected,
+  onToggle
+}: {
+  title: string;
+  items: { id: string; label: string }[];
+  selected: string[];
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <div className="selector-group">
+      <h3>{title}</h3>
+      {items.map((item) => (
+        <label key={item.id}>
+          <input type="checkbox" checked={selected.includes(item.id)} onChange={() => onToggle(item.id)} />
+          <span>{item.label}</span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function StrategyCard({ result }: { result: SimulationStrategyResult }) {
+  return (
+    <article className="strategy-card">
+      <span className="status-badge assigned">{formatStrategy(result.strategy)}</span>
+      <div className="strategy-numbers">
+        <InfoLine label="Matched" value={String(result.matchedCount)} />
+        <InfoLine label="Unmatched" value={String(result.unmatchedCount)} />
+        <InfoLine label="Avg Pickup" value={`${result.averagePickupEtaMinutes} min`} />
+        <InfoLine label="Avg Transfer" value={`${result.averageTransferEtaMinutes} min`} />
+        <InfoLine label="Total Cost" value={String(result.totalCost)} />
+        <InfoLine label="Improvement" value={`${result.improvementPercent}%`} />
+      </div>
+    </article>
+  );
+}
+
+function AssignmentTable({ result }: { result: SimulationStrategyResult | null }) {
+  if (!result) {
+    return <div className="empty-state">No assignments yet</div>;
+  }
+
+  return (
+    <div className="assignment-table">
+      <div className="assignment-header">
+        <span>Incident</span>
+        <span>Match</span>
+        <span>ETA</span>
+        <span>Cost</span>
+      </div>
+      {result.assignments.map((assignment) => (
+        <div className={`assignment-row ${assignment.matched ? '' : 'unmatched'}`} key={`${assignment.strategy}-${assignment.incidentId}`}>
+          <span>
+            <strong>{assignment.incidentId}</strong>
+            <small>{assignment.condition} - {assignment.priority}</small>
+          </span>
+          <span>{assignment.matched ? `${assignment.ambulanceId} -> ${assignment.hospitalId}` : 'Unmatched'}</span>
+          <span>{assignment.matched ? `${assignment.pickupEtaMinutes} / ${assignment.hospitalEtaMinutes} min` : '-'}</span>
+          <span>{assignment.matched ? assignment.totalCost : '-'}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -771,6 +1167,44 @@ function IncidentForm({
       <button className="primary-button" type="button" onClick={onSubmit} disabled={busy}>
         {submitLabel}
       </button>
+    </div>
+  );
+}
+
+function LiveAmbulanceRow({
+  ambulance,
+  liveLocation,
+  onMoveAmbulance,
+  busy
+}: {
+  ambulance: Ambulance;
+  liveLocation: AmbulanceLocationSnapshot | null;
+  onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
+  busy: boolean;
+}) {
+  const step = 0.006;
+
+  return (
+    <div className="resource-row live-row">
+      <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
+      <span>
+        <strong>{ambulance.callSign}</strong>
+        <small>{liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : ambulance.baseStation}</small>
+      </span>
+      <div className="movement-controls" aria-label={`Move ${ambulance.callSign}`}>
+        <button type="button" onClick={() => onMoveAmbulance(ambulance, step, 0)} disabled={busy} title="Move north" aria-label="Move north">
+          <ArrowUp size={14} />
+        </button>
+        <button type="button" onClick={() => onMoveAmbulance(ambulance, 0, -step)} disabled={busy} title="Move west" aria-label="Move west">
+          <ArrowLeft size={14} />
+        </button>
+        <button type="button" onClick={() => onMoveAmbulance(ambulance, 0, step)} disabled={busy} title="Move east" aria-label="Move east">
+          <ArrowRight size={14} />
+        </button>
+        <button type="button" onClick={() => onMoveAmbulance(ambulance, -step, 0)} disabled={busy} title="Move south" aria-label="Move south">
+          <ArrowDown size={14} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -1019,6 +1453,7 @@ function MetricCard({ icon, label, value, tone }: { icon: ReactNode; label: stri
 
 function MapPanel({
   ambulances,
+  liveLocations,
   hospitals,
   incidents,
   trips,
@@ -1027,6 +1462,7 @@ function MapPanel({
   compact = false
 }: {
   ambulances: Ambulance[];
+  liveLocations: AmbulanceLocationSnapshot[];
   hospitals: Hospital[];
   incidents: Incident[];
   trips: Trip[];
@@ -1069,18 +1505,12 @@ function MapPanel({
           </CircleMarker>
         ))}
         {ambulances.map((ambulance) => (
-          <CircleMarker
+          <AmbulanceMarker
             key={ambulance.id}
-            center={[ambulance.location.latitude, ambulance.location.longitude]}
-            radius={ambulance.id === selectedTrip?.ambulanceId ? 11 : ambulance.status === 'AVAILABLE' ? 8 : 6}
-            pathOptions={{ color: '#1d4ed8', fillColor: ambulance.status === 'AVAILABLE' ? '#3b82f6' : '#94a3b8', fillOpacity: 0.9 }}
-          >
-            <Popup>
-              <strong>{ambulance.callSign}</strong>
-              <br />
-              {ambulance.type} - {formatStatus(ambulance.status)}
-            </Popup>
-          </CircleMarker>
+            ambulance={ambulance}
+            selected={ambulance.id === selectedTrip?.ambulanceId}
+            liveLocation={liveLocations.find((location) => location.ambulanceId === ambulance.id) ?? null}
+          />
         ))}
         {incidents.map((incident) => (
           <CircleMarker
@@ -1101,6 +1531,32 @@ function MapPanel({
   );
 }
 
+function AmbulanceMarker({
+  ambulance,
+  selected,
+  liveLocation
+}: {
+  ambulance: Ambulance;
+  selected: boolean;
+  liveLocation: AmbulanceLocationSnapshot | null;
+}) {
+  return (
+    <CircleMarker
+      center={[ambulance.location.latitude, ambulance.location.longitude]}
+      radius={selected ? 11 : ambulance.status === 'AVAILABLE' ? 8 : 6}
+      pathOptions={{ color: liveLocation ? '#0f766e' : '#1d4ed8', fillColor: ambulance.status === 'AVAILABLE' ? '#3b82f6' : '#94a3b8', fillOpacity: 0.9 }}
+    >
+      <Popup>
+        <strong>{ambulance.callSign}</strong>
+        <br />
+        {ambulance.type} - {formatStatus(ambulance.status)}
+        <br />
+        {liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : ambulance.baseStation}
+      </Popup>
+    </CircleMarker>
+  );
+}
+
 function roleFromPath(pathname: string): Role {
   const role = pathname.replace('/', '') as Role;
   return roles.some((candidate) => candidate.id === role) ? role : 'control';
@@ -1110,8 +1566,22 @@ function rolePath(role: Role) {
   return `/${role}`;
 }
 
+function notificationRoleFor(role: Role) {
+  return role === 'simulation' ? 'control' : role;
+}
+
+function toggleSelection(values: string[], value: string) {
+  return values.includes(value)
+    ? values.filter((candidate) => candidate !== value)
+    : [...values, value];
+}
+
 function formatStatus(value: string) {
   return value.toLowerCase().split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function formatStrategy(value: OptimizationStrategy) {
+  return value === 'GREEDY_SEQUENTIAL' ? 'Greedy Sequential' : 'Global Min Cost';
 }
 
 function outboxDeliveryState(event: OutboxEvent) {
@@ -1141,4 +1611,11 @@ function formatDuration(seconds: number) {
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
+}
+
+function formatRelativeTime(value: string) {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return `${Math.floor(seconds / 3600)}h ago`;
 }

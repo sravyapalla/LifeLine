@@ -1,16 +1,21 @@
 import type {
   Ambulance,
+  AmbulanceLocationSnapshot,
   CreateIncidentPayload,
   DispatchAuditRecord,
   DispatchResponse,
   Hospital,
   Incident,
   Metrics,
+  Notification,
   OutboxEvent,
   OutboxPublishResponse,
   OutboxSummary,
+  SimulationRequestPayload,
+  SimulationResult,
   Trip,
-  TripStatus
+  TripStatus,
+  UpdateAmbulanceLocationPayload
 } from './types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api';
@@ -37,19 +42,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return JSON.parse(text) as T;
 }
 
-export async function getDashboardData() {
-  const [ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics] = await Promise.all([
+export async function getDashboardData(role = 'control') {
+  const [ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications, simulations] = await Promise.all([
     request<Ambulance[]>('/ambulances'),
+    request<AmbulanceLocationSnapshot[]>('/ambulance-locations'),
     request<Hospital[]>('/hospitals'),
     request<Incident[]>('/incidents'),
     request<Trip[]>('/trips'),
     request<DispatchAuditRecord[]>('/dispatch-decisions'),
     request<OutboxEvent[]>('/outbox-events'),
     request<OutboxSummary>('/outbox-events/summary'),
-    request<Metrics>('/metrics')
+    request<Metrics>('/metrics'),
+    request<Notification[]>(`/notifications?role=${role}`),
+    request<SimulationResult[]>('/simulations')
   ]);
 
-  return { ambulances, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics };
+  return { ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications, simulations };
 }
 
 export function createIncident(payload: CreateIncidentPayload) {
@@ -96,4 +104,28 @@ export function publishOutboxEvents() {
   return request<OutboxPublishResponse>('/outbox-events/publish', {
     method: 'POST'
   });
+}
+
+export function updateAmbulanceLocation(ambulanceId: string, payload: UpdateAmbulanceLocationPayload) {
+  return request<AmbulanceLocationSnapshot>(`/ambulances/${ambulanceId}/location`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function acknowledgeNotification(notificationId: string) {
+  return request<Notification>(`/notifications/${notificationId}/ack`, {
+    method: 'POST'
+  });
+}
+
+export function runSimulation(payload: SimulationRequestPayload) {
+  return request<SimulationResult>('/simulations', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getSimulation(simulationId: string) {
+  return request<SimulationResult>(`/simulations/${simulationId}`);
 }
