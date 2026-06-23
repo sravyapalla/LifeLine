@@ -296,6 +296,9 @@ public class SimulationService {
                     condition,
                     priority,
                     new Location(round(latitude), round(longitude)),
+                    "Generated scenario address " + (index + 1),
+                    "",
+                    "SIMULATION",
                     Instant.now(),
                     IncidentStatus.NEW
             ));

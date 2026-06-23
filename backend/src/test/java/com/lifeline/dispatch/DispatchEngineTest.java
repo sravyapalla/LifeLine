@@ -31,6 +31,9 @@ class DispatchEngineTest {
                 EmergencyCondition.CARDIAC,
                 IncidentPriority.CRITICAL,
                 new Location(12.95, 77.63),
+                "Test address",
+                "",
+                "TEST",
                 Instant.now(),
                 IncidentStatus.NEW
         );
@@ -61,6 +64,9 @@ class DispatchEngineTest {
                 EmergencyCondition.TRAUMA,
                 IncidentPriority.HIGH,
                 new Location(12.95, 77.63),
+                "Test address",
+                "",
+                "TEST",
                 Instant.now(),
                 IncidentStatus.ASSIGNED
         );

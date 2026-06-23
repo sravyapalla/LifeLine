@@ -5,6 +5,7 @@ import com.lifeline.domain.Ambulance;
 import com.lifeline.domain.DispatchAuditRecord;
 import com.lifeline.domain.EmergencyCondition;
 import com.lifeline.domain.Hospital;
+import com.lifeline.domain.HospitalApplication;
 import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentPriority;
 import com.lifeline.domain.Location;
@@ -24,6 +25,8 @@ public interface LifeLineStore {
     List<Ambulance> ambulances();
 
     List<Hospital> hospitals();
+
+    List<HospitalApplication> hospitalApplications();
 
     List<Incident> incidents();
 
@@ -64,7 +67,18 @@ public interface LifeLineStore {
             IncidentPriority priority,
             Location location
     ) {
-        return createIncident("patient.demo", patientName, phone, condition, priority, location);
+        return createIncident("patient.demo", patientName, phone, condition, priority, location, "", "", "COORDINATES");
+    }
+
+    default Incident createIncident(
+            String requesterUserId,
+            String patientName,
+            String phone,
+            EmergencyCondition condition,
+            IncidentPriority priority,
+            Location location
+    ) {
+        return createIncident(requesterUserId, patientName, phone, condition, priority, location, "", "", "COORDINATES");
     }
 
     Incident createIncident(
@@ -73,8 +87,23 @@ public interface LifeLineStore {
             String phone,
             EmergencyCondition condition,
             IncidentPriority priority,
-            Location location
+            Location location,
+            String addressText,
+            String landmark,
+            String locationSource
     );
+
+    HospitalApplication createHospitalApplication(
+            String hospitalName,
+            String contactName,
+            String contactPhone,
+            String addressText,
+            Location location,
+            java.util.Set<EmergencyCondition> specialties,
+            int totalBeds
+    );
+
+    HospitalApplication approveHospitalApplication(String applicationId);
 
     Trip commitAssignment(
             String incidentId,

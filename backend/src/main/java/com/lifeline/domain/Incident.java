@@ -10,10 +10,13 @@ public record Incident(
         EmergencyCondition condition,
         IncidentPriority priority,
         Location location,
+        String addressText,
+        String landmark,
+        String locationSource,
         Instant createdAt,
         IncidentStatus status
 ) {
     public Incident withStatus(IncidentStatus nextStatus) {
-        return new Incident(id, requesterUserId, patientName, phone, condition, priority, location, createdAt, nextStatus);
+        return new Incident(id, requesterUserId, patientName, phone, condition, priority, location, addressText, landmark, locationSource, createdAt, nextStatus);
     }
 }

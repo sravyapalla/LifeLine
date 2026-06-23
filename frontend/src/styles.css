@@ -55,6 +55,92 @@ button {
   gap: 12px;
 }
 
+.enrollment-panel {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.specialty-picker {
+  display: grid;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.specialty-picker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-muted);
+}
+
+.chip-checkbox input {
+  width: auto;
+}
+
+.chip-checkbox.checked {
+  border-color: #0f766e;
+  background: #ecfdf5;
+}
+
+.form-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.location-source-row,
+.gps-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.location-source-row span {
+  min-height: 30px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  color: #0f766e;
+  background: #ecfdf5;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.application-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.application-row:last-child {
+  border-bottom: 0;
+}
+
+.application-row span {
+  display: grid;
+  gap: 3px;
+}
+
+.application-row small {
+  color: var(--muted);
+}
+
 .login-form label {
   color: #475569;
   display: grid;

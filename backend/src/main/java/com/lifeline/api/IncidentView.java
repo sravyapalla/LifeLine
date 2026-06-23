@@ -15,6 +15,9 @@ public record IncidentView(
         EmergencyCondition condition,
         IncidentPriority priority,
         Location location,
+        String addressText,
+        String landmark,
+        String locationSource,
         Instant createdAt,
         IncidentStatus status
 ) {
@@ -26,6 +29,9 @@ public record IncidentView(
                 incident.condition(),
                 incident.priority(),
                 incident.location(),
+                incident.addressText(),
+                incident.landmark(),
+                incident.locationSource(),
                 incident.createdAt(),
                 incident.status()
         );
@@ -39,6 +45,9 @@ public record IncidentView(
                 incident.condition(),
                 incident.priority(),
                 incident.location(),
+                incident.addressText(),
+                incident.landmark(),
+                incident.locationSource(),
                 incident.createdAt(),
                 incident.status()
         );

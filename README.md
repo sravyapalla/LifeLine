@@ -69,6 +69,26 @@ current Spring app     intake boundary      fleet/capacity      matching/routing
 
 V7 keeps a strangler-style transition: the gateway can route to the current operations backend while new service shells are deployed and verified. The important engineering decision is that API contracts, data ownership, and runtime deployment are explicit now, so future extraction is a move with contract tests rather than a rewrite.
 
+## Product Flows
+
+### Hospital Enrollment
+
+Hospitals can submit an application from the login screen without a demo account. The application captures hospital identity, contact information, address, coordinates, specialties, and bed count. Control reviews pending applications and approval creates a real hospital resource that participates in capacity visibility and future dispatch matching.
+
+This keeps public enrollment separate from operational access: submitting an application is unauthenticated, but review and approval are control-only actions.
+
+### Patient Address Intake
+
+Patient incident creation is address-first. The patient enters an address and optional landmark, then can use browser location to attach GPS coordinates. Coordinates remain visible as an operational fallback because dispatch still requires deterministic latitude and longitude until an external geocoder is introduced.
+
+### Live Location Tracking
+
+Drivers can start browser GPS sharing from their driver workspace. Each GPS update writes to the ambulance live-location projection, which is stored in Redis with TTL in the full runtime and falls back to memory for lightweight demos. Dispatch and maps use live ambulance location when fresh, otherwise they fall back to the persisted fleet location.
+
+### Active Ambulance Visibility
+
+Control Tower now separates active ambulances from the full fleet. A unit is active when it has a fresh live location or is attached to an active trip. This gives operators a clearer answer to which ambulances are currently moving or committed, instead of asking them to infer it from raw fleet state.
+
 ## Data Architecture
 
 | Data | System of Record | Notes |
@@ -77,6 +97,7 @@ V7 keeps a strangler-style transition: the gateway can route to the current oper
 | Ambulance profile | PostgreSQL/PostGIS | Fleet identity, capability, base location, operational status |
 | Ambulance live location | Redis with TTL | Fast, ephemeral projection; dispatch falls back to persisted location |
 | Hospital profile and capacity | PostgreSQL/PostGIS | Bed availability is authoritative and auditable |
+| Hospital applications | PostgreSQL/PostGIS or memory profile | Public partner onboarding queue reviewed by control |
 | Trips | PostgreSQL/PostGIS | Assignment and care journey lifecycle |
 | Dispatch decisions | PostgreSQL/PostGIS | Candidate scores, winning reason, alternatives |
 | Outbox events | PostgreSQL/PostGIS, then Kafka | Transactional outbox protects state change and event publishing |
