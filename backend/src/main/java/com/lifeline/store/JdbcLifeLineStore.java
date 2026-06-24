@@ -9,6 +9,8 @@ import com.lifeline.domain.AmbulanceType;
 import com.lifeline.domain.DispatchAuditRecord;
 import com.lifeline.domain.EmergencyCondition;
 import com.lifeline.domain.Hospital;
+import com.lifeline.domain.HospitalApplication;
+import com.lifeline.domain.HospitalApplicationStatus;
 import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentPriority;
 import com.lifeline.domain.IncidentStatus;
@@ -76,9 +78,20 @@ public class JdbcLifeLineStore implements LifeLineStore {
     }
 
     @Override
+    public List<HospitalApplication> hospitalApplications() {
+        return jdbc.query("""
+                SELECT id, hospital_name, contact_name, contact_phone, address_text, latitude, longitude,
+                       specialties, total_beds, status, created_at, reviewed_at
+                FROM hospital_applications
+                ORDER BY created_at DESC
+                """, hospitalApplicationMapper());
+    }
+
+    @Override
     public List<Incident> incidents() {
         return jdbc.query("""
-                SELECT id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
+                SELECT id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude,
+                       address_text, landmark, location_source, created_at, status
                 FROM incidents
                 ORDER BY created_at DESC
                 """, incidentMapper());
@@ -215,7 +228,8 @@ public class JdbcLifeLineStore implements LifeLineStore {
     @Override
     public Optional<Incident> findIncident(String id) {
         return queryOptional("""
-                SELECT id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
+                SELECT id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude,
+                       address_text, landmark, location_source, created_at, status
                 FROM incidents
                 WHERE id = ?
                 """, incidentMapper(), id);
@@ -271,14 +285,18 @@ public class JdbcLifeLineStore implements LifeLineStore {
             String phone,
             EmergencyCondition condition,
             IncidentPriority priority,
-            Location location
+            Location location,
+            String addressText,
+            String landmark,
+            String locationSource
     ) {
         String id = newId("INC");
         Instant now = Instant.now();
 
         jdbc.update("""
-                INSERT INTO incidents (id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO incidents (id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude,
+                                       address_text, landmark, location_source, created_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 id,
                 requesterUserId,
@@ -288,6 +306,9 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 priority.name(),
                 location.latitude(),
                 location.longitude(),
+                addressText,
+                landmark == null ? "" : landmark,
+                locationSource == null ? "MANUAL" : locationSource,
                 Timestamp.from(now),
                 IncidentStatus.NEW.name()
         );
@@ -299,6 +320,88 @@ public class JdbcLifeLineStore implements LifeLineStore {
         ), now);
 
         return findIncident(id).orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public HospitalApplication createHospitalApplication(
+            String hospitalName,
+            String contactName,
+            String contactPhone,
+            String addressText,
+            Location location,
+            Set<EmergencyCondition> specialties,
+            int totalBeds
+    ) {
+        String id = newId("HAPP");
+        Instant now = Instant.now();
+        jdbc.update("""
+                INSERT INTO hospital_applications (id, hospital_name, contact_name, contact_phone, address_text,
+                                                  latitude, longitude, specialties, total_beds, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                id,
+                hospitalName,
+                contactName,
+                contactPhone,
+                addressText,
+                location.latitude(),
+                location.longitude(),
+                specialties.stream().map(Enum::name).sorted().collect(Collectors.joining(",")),
+                totalBeds,
+                HospitalApplicationStatus.PENDING.name(),
+                Timestamp.from(now)
+        );
+        appendOutbox("HospitalApplication", id, "hospital.application.submitted", Map.of(
+                "applicationId", id,
+                "hospitalName", hospitalName
+        ), now);
+        return hospitalApplications().stream()
+                .filter(application -> application.id().equals(id))
+                .findFirst()
+                .orElseThrow();
+    }
+
+    @Override
+    @Transactional
+    public HospitalApplication approveHospitalApplication(String applicationId) {
+        HospitalApplication application = queryOptional("""
+                SELECT id, hospital_name, contact_name, contact_phone, address_text, latitude, longitude,
+                       specialties, total_beds, status, created_at, reviewed_at
+                FROM hospital_applications
+                WHERE id = ?
+                FOR UPDATE
+                """, hospitalApplicationMapper(), applicationId)
+                .orElseThrow(() -> new IllegalStateException("Hospital application not found."));
+        if (application.status() != HospitalApplicationStatus.PENDING) {
+            throw new IllegalStateException("Hospital application is already reviewed.");
+        }
+        String hospitalId = newId("HOS");
+        insertHospital(new Hospital(
+                hospitalId,
+                application.hospitalName(),
+                application.location(),
+                application.specialties(),
+                application.totalBeds(),
+                application.totalBeds(),
+                0.82
+        ));
+        Instant now = Instant.now();
+        jdbc.update("""
+                UPDATE hospital_applications
+                SET status = ?, reviewed_at = ?
+                WHERE id = ?
+                """, HospitalApplicationStatus.APPROVED.name(), Timestamp.from(now), applicationId);
+        appendOutbox("HospitalApplication", applicationId, "hospital.application.approved", Map.of(
+                "applicationId", applicationId,
+                "hospitalId", hospitalId
+        ), now);
+        return queryOptional("""
+                SELECT id, hospital_name, contact_name, contact_phone, address_text, latitude, longitude,
+                       specialties, total_beds, status, created_at, reviewed_at
+                FROM hospital_applications
+                WHERE id = ?
+                """, hospitalApplicationMapper(), applicationId).orElseThrow();
     }
 
     @Override
@@ -720,7 +823,7 @@ public class JdbcLifeLineStore implements LifeLineStore {
     public void reset() {
         jdbc.execute("""
                 TRUNCATE TABLE dispatch_candidate_scores, dispatch_decisions, outbox_events, notifications,
-                               simulation_assignments, simulation_runs,
+                               simulation_assignments, simulation_runs, hospital_applications,
                                trips, incidents, hospital_specialties, hospitals, ambulances
                 RESTART IDENTITY
                 """);
@@ -729,7 +832,8 @@ public class JdbcLifeLineStore implements LifeLineStore {
 
     private Optional<Incident> lockIncident(String id) {
         return queryOptional("""
-                SELECT id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status
+                SELECT id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude,
+                       address_text, landmark, location_source, created_at, status
                 FROM incidents
                 WHERE id = ?
                 FOR UPDATE
@@ -805,8 +909,8 @@ public class JdbcLifeLineStore implements LifeLineStore {
         insertHospital(new Hospital("HOS-205", "Baptist North Care", new Location(13.0358, 77.5891), Set.of(EmergencyCondition.STROKE, EmergencyCondition.GENERAL), 44, 11, 0.84));
 
         Instant now = Instant.now();
-        insertIncident(new Incident("INC-301", "patient.demo", "Ananya Rao", "+91-90000-10001", EmergencyCondition.CARDIAC, IncidentPriority.CRITICAL, new Location(12.9458, 77.6309), now.minusSeconds(180), IncidentStatus.NEW));
-        insertIncident(new Incident("INC-302", "patient.demo", "Rohan Mehta", "+91-90000-10002", EmergencyCondition.TRAUMA, IncidentPriority.HIGH, new Location(12.9166, 77.6101), now.minusSeconds(90), IncidentStatus.NEW));
+        insertIncident(new Incident("INC-301", "patient.demo", "Ananya Rao", "+91-90000-10001", EmergencyCondition.CARDIAC, IncidentPriority.CRITICAL, new Location(12.9458, 77.6309), "Koramangala 5th Block, Bengaluru", "Near Forum signal", "SEEDED", now.minusSeconds(180), IncidentStatus.NEW));
+        insertIncident(new Incident("INC-302", "patient.demo", "Rohan Mehta", "+91-90000-10002", EmergencyCondition.TRAUMA, IncidentPriority.HIGH, new Location(12.9166, 77.6101), "BTM Layout 2nd Stage, Bengaluru", "Main road", "SEEDED", now.minusSeconds(90), IncidentStatus.NEW));
     }
 
     private void insertAmbulance(Ambulance ambulance) {
@@ -847,8 +951,9 @@ public class JdbcLifeLineStore implements LifeLineStore {
 
     private void insertIncident(Incident incident) {
         jdbc.update("""
-                INSERT INTO incidents (id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude, created_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO incidents (id, requester_user_id, patient_name, phone, condition, priority, latitude, longitude,
+                                       address_text, landmark, location_source, created_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 incident.id(),
                 incident.requesterUserId(),
@@ -858,6 +963,9 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 incident.priority().name(),
                 incident.location().latitude(),
                 incident.location().longitude(),
+                incident.addressText(),
+                incident.landmark(),
+                incident.locationSource(),
                 Timestamp.from(incident.createdAt()),
                 incident.status().name()
         );
@@ -936,8 +1044,27 @@ public class JdbcLifeLineStore implements LifeLineStore {
                 EmergencyCondition.valueOf(rs.getString("condition")),
                 IncidentPriority.valueOf(rs.getString("priority")),
                 new Location(rs.getDouble("latitude"), rs.getDouble("longitude")),
+                rs.getString("address_text"),
+                rs.getString("landmark"),
+                rs.getString("location_source"),
                 instant(rs, "created_at"),
                 IncidentStatus.valueOf(rs.getString("status"))
+        );
+    }
+
+    private RowMapper<HospitalApplication> hospitalApplicationMapper() {
+        return (rs, rowNum) -> new HospitalApplication(
+                rs.getString("id"),
+                rs.getString("hospital_name"),
+                rs.getString("contact_name"),
+                rs.getString("contact_phone"),
+                rs.getString("address_text"),
+                new Location(rs.getDouble("latitude"), rs.getDouble("longitude")),
+                parseSpecialties(rs.getString("specialties")),
+                rs.getInt("total_beds"),
+                HospitalApplicationStatus.valueOf(rs.getString("status")),
+                instant(rs, "created_at"),
+                nullableInstant(rs, "reviewed_at")
         );
     }
 
@@ -1114,6 +1241,22 @@ public class JdbcLifeLineStore implements LifeLineStore {
     private Instant instant(ResultSet rs, String column) throws SQLException {
         OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
         return value == null ? null : value.toInstant();
+    }
+
+    private Instant nullableInstant(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+        return value == null ? null : value.toInstant();
+    }
+
+    private Set<EmergencyCondition> parseSpecialties(String rawSpecialties) {
+        if (rawSpecialties == null || rawSpecialties.isBlank()) {
+            return Set.of();
+        }
+        return List.of(rawSpecialties.split(",")).stream()
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(EmergencyCondition::valueOf)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
     private String newId(String prefix) {

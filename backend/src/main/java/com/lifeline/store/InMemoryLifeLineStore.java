@@ -7,6 +7,8 @@ import com.lifeline.domain.AmbulanceType;
 import com.lifeline.domain.DispatchAuditRecord;
 import com.lifeline.domain.EmergencyCondition;
 import com.lifeline.domain.Hospital;
+import com.lifeline.domain.HospitalApplication;
+import com.lifeline.domain.HospitalApplicationStatus;
 import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentPriority;
 import com.lifeline.domain.IncidentStatus;
@@ -37,6 +39,7 @@ import java.util.UUID;
 public class InMemoryLifeLineStore implements LifeLineStore {
     private final Map<String, Ambulance> ambulances = new LinkedHashMap<>();
     private final Map<String, Hospital> hospitals = new LinkedHashMap<>();
+    private final Map<String, HospitalApplication> hospitalApplications = new LinkedHashMap<>();
     private final Map<String, Incident> incidents = new LinkedHashMap<>();
     private final Map<String, Trip> trips = new LinkedHashMap<>();
     private final List<DispatchAuditRecord> dispatchDecisions = new ArrayList<>();
@@ -53,6 +56,7 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     public synchronized void reset() {
         ambulances.clear();
         hospitals.clear();
+        hospitalApplications.clear();
         incidents.clear();
         trips.clear();
         dispatchDecisions.clear();
@@ -73,8 +77,8 @@ public class InMemoryLifeLineStore implements LifeLineStore {
         addHospital(new Hospital("HOS-204", "Cloudnine Pediatric ER", new Location(12.9336, 77.6234), Set.of(EmergencyCondition.PEDIATRIC, EmergencyCondition.GENERAL), 35, 9, 0.89));
         addHospital(new Hospital("HOS-205", "Baptist North Care", new Location(13.0358, 77.5891), Set.of(EmergencyCondition.STROKE, EmergencyCondition.GENERAL), 44, 11, 0.84));
 
-        saveIncident(new Incident("INC-301", "patient.demo", "Ananya Rao", "+91-90000-10001", EmergencyCondition.CARDIAC, IncidentPriority.CRITICAL, new Location(12.9458, 77.6309), Instant.now().minusSeconds(180), IncidentStatus.NEW));
-        saveIncident(new Incident("INC-302", "patient.demo", "Rohan Mehta", "+91-90000-10002", EmergencyCondition.TRAUMA, IncidentPriority.HIGH, new Location(12.9166, 77.6101), Instant.now().minusSeconds(90), IncidentStatus.NEW));
+        saveIncident(new Incident("INC-301", "patient.demo", "Ananya Rao", "+91-90000-10001", EmergencyCondition.CARDIAC, IncidentPriority.CRITICAL, new Location(12.9458, 77.6309), "Koramangala 5th Block, Bengaluru", "Near Forum signal", "SEEDED", Instant.now().minusSeconds(180), IncidentStatus.NEW));
+        saveIncident(new Incident("INC-302", "patient.demo", "Rohan Mehta", "+91-90000-10002", EmergencyCondition.TRAUMA, IncidentPriority.HIGH, new Location(12.9166, 77.6101), "BTM Layout 2nd Stage, Bengaluru", "Main road", "SEEDED", Instant.now().minusSeconds(90), IncidentStatus.NEW));
     }
 
     @Override
@@ -85,6 +89,13 @@ public class InMemoryLifeLineStore implements LifeLineStore {
     @Override
     public synchronized List<Hospital> hospitals() {
         return new ArrayList<>(hospitals.values());
+    }
+
+    @Override
+    public synchronized List<HospitalApplication> hospitalApplications() {
+        return hospitalApplications.values().stream()
+                .sorted(Comparator.comparing(HospitalApplication::createdAt).reversed())
+                .toList();
     }
 
     @Override
@@ -206,14 +217,80 @@ public class InMemoryLifeLineStore implements LifeLineStore {
             String phone,
             EmergencyCondition condition,
             IncidentPriority priority,
-            Location location
+            Location location,
+            String addressText,
+            String landmark,
+            String locationSource
     ) {
         String id = "INC-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         Instant now = Instant.now();
-        Incident incident = new Incident(id, requesterUserId, patientName, phone, condition, priority, location, now, IncidentStatus.NEW);
+        Incident incident = new Incident(id, requesterUserId, patientName, phone, condition, priority, location, addressText, landmark == null ? "" : landmark, locationSource == null ? "MANUAL" : locationSource, now, IncidentStatus.NEW);
         incidents.put(id, incident);
         appendOutbox("Incident", id, "incident.created", "{\"incidentId\":\"%s\"}".formatted(id), now);
         return incident;
+    }
+
+    @Override
+    public synchronized HospitalApplication createHospitalApplication(
+            String hospitalName,
+            String contactName,
+            String contactPhone,
+            String addressText,
+            Location location,
+            Set<EmergencyCondition> specialties,
+            int totalBeds
+    ) {
+        String id = "HAPP-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        HospitalApplication application = new HospitalApplication(
+                id,
+                hospitalName,
+                contactName,
+                contactPhone,
+                addressText,
+                location,
+                Set.copyOf(specialties),
+                totalBeds,
+                HospitalApplicationStatus.PENDING,
+                Instant.now(),
+                null
+        );
+        hospitalApplications.put(id, application);
+        return application;
+    }
+
+    @Override
+    public synchronized HospitalApplication approveHospitalApplication(String applicationId) {
+        HospitalApplication application = Optional.ofNullable(hospitalApplications.get(applicationId))
+                .orElseThrow(() -> new IllegalStateException("Hospital application not found."));
+        if (application.status() != HospitalApplicationStatus.PENDING) {
+            throw new IllegalStateException("Hospital application is already reviewed.");
+        }
+        Hospital hospital = new Hospital(
+                "HOS-" + UUID.randomUUID().toString().substring(0, 6).toUpperCase(),
+                application.hospitalName(),
+                application.location(),
+                application.specialties(),
+                application.totalBeds(),
+                application.totalBeds(),
+                0.82
+        );
+        hospitals.put(hospital.id(), hospital);
+        HospitalApplication approved = new HospitalApplication(
+                application.id(),
+                application.hospitalName(),
+                application.contactName(),
+                application.contactPhone(),
+                application.addressText(),
+                application.location(),
+                application.specialties(),
+                application.totalBeds(),
+                HospitalApplicationStatus.APPROVED,
+                application.createdAt(),
+                Instant.now()
+        );
+        hospitalApplications.put(applicationId, approved);
+        appendOutbox("HospitalApplication", applicationId, "hospital.application.approved", "{\"applicationId\":\"%s\",\"hospitalId\":\"%s\"}".formatted(applicationId, hospital.id()), Instant.now());
+        return approved;
     }
 
     @Override

@@ -4,9 +4,11 @@ import type {
   AuthResponse,
   AuthenticatedUser,
   CreateIncidentPayload,
+  CreateHospitalApplicationPayload,
   DispatchAuditRecord,
   DispatchResponse,
   Hospital,
+  HospitalApplication,
   Incident,
   LoginRequest,
   Metrics,
@@ -141,6 +143,23 @@ export function createIncident(payload: CreateIncidentPayload) {
   return request<Incident>('/incidents', {
     method: 'POST',
     body: JSON.stringify(payload)
+  });
+}
+
+export function createHospitalApplication(payload: CreateHospitalApplicationPayload) {
+  return request<HospitalApplication>('/hospital-applications', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getHospitalApplications() {
+  return request<HospitalApplication[]>('/hospital-applications');
+}
+
+export function approveHospitalApplication(applicationId: string) {
+  return request<HospitalApplication>(`/hospital-applications/${applicationId}/approve`, {
+    method: 'POST'
   });
 }
 

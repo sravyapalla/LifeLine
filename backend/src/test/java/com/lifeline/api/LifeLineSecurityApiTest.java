@@ -179,6 +179,45 @@ class LifeLineSecurityApiTest {
     }
 
     @Test
+    void hospitalApplicationCanBeSubmittedPubliclyAndApprovedByControl() throws Exception {
+        String response = mockMvc.perform(post("/api/hospital-applications")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "hospitalName", "V8 Partner Hospital",
+                                "contactName", "Ops Lead",
+                                "contactPhone", "+91-90000-33333",
+                                "addressText", "Indiranagar, Bengaluru",
+                                "latitude", 12.9784,
+                                "longitude", 77.6408,
+                                "specialties", java.util.List.of("GENERAL", "TRAUMA"),
+                                "totalBeds", 22
+                        ))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status", is("PENDING")))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+
+        String applicationId = objectMapper.readTree(response).get("id").asText();
+        String controlToken = login("control.demo");
+
+        mockMvc.perform(get("/api/hospital-applications")
+                        .header("Authorization", bearer(controlToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id", is(applicationId)));
+
+        mockMvc.perform(post("/api/hospital-applications/" + applicationId + "/approve")
+                        .header("Authorization", bearer(controlToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", is("APPROVED")));
+
+        mockMvc.perform(get("/api/hospitals")
+                        .header("Authorization", bearer(controlToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].name", hasItem("V8 Partner Hospital")));
+    }
+
+    @Test
     void configuredCorsAllowsLocalFrontendOrigin() throws Exception {
         mockMvc.perform(options("/api/incidents")
                         .header("Origin", "http://localhost:5173")

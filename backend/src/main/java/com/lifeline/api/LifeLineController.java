@@ -8,6 +8,7 @@ import com.lifeline.domain.AmbulanceLocationSnapshot;
 import com.lifeline.domain.AmbulanceStatus;
 import com.lifeline.domain.DispatchAuditRecord;
 import com.lifeline.domain.Hospital;
+import com.lifeline.domain.HospitalApplication;
 import com.lifeline.domain.Incident;
 import com.lifeline.domain.IncidentStatus;
 import com.lifeline.domain.Location;
@@ -103,6 +104,27 @@ public class LifeLineController {
     @GetMapping("/hospitals")
     public List<Hospital> hospitals() {
         return visibleHospitals(currentUser());
+    }
+
+    @PostMapping("/hospital-applications")
+    @ResponseStatus(HttpStatus.CREATED)
+    public HospitalApplication createHospitalApplication(@Valid @RequestBody CreateHospitalApplicationRequest request) {
+        return store.createHospitalApplication(
+                request.hospitalName(),
+                request.contactName(),
+                request.contactPhone(),
+                request.addressText(),
+                new Location(request.latitude(), request.longitude()),
+                request.specialties(),
+                request.totalBeds()
+        );
+    }
+
+    @GetMapping("/hospital-applications")
+    public List<HospitalApplication> hospitalApplications() {
+        AuthenticatedUser user = currentUser();
+        requireControl(user, "Only control can review hospital applications.");
+        return store.hospitalApplications();
     }
 
     @GetMapping("/incidents")
@@ -291,7 +313,10 @@ public class LifeLineController {
                 request.phone(),
                 request.condition(),
                 request.priority(),
-                new Location(request.latitude(), request.longitude())
+                new Location(request.latitude(), request.longitude()),
+                request.addressText(),
+                request.landmark(),
+                request.locationSource()
         );
         auditService.allowed(
                 user,
@@ -412,6 +437,22 @@ public class LifeLineController {
                 Map.of("availableBeds", request.availableBeds())
         );
         return hospital;
+    }
+
+    @PostMapping("/hospital-applications/{applicationId}/approve")
+    public HospitalApplication approveHospitalApplication(@PathVariable String applicationId) {
+        AuthenticatedUser user = currentUser();
+        requireControl(user, "Only control can approve hospital applications.");
+        HospitalApplication application = store.approveHospitalApplication(applicationId);
+        auditService.allowed(
+                user,
+                "hospital.application.approve",
+                "HospitalApplication",
+                applicationId,
+                "Hospital application approved.",
+                Map.of("hospitalName", application.hospitalName(), "status", application.status().name())
+        );
+        return application;
     }
 
     @PostMapping("/trips/{tripId}/reroute")

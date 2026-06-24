@@ -47,8 +47,27 @@ export interface Incident {
   condition: EmergencyCondition;
   priority: IncidentPriority;
   location: Location;
+  addressText: string;
+  landmark: string;
+  locationSource: string;
   createdAt: string;
   status: IncidentStatus;
+}
+
+export type HospitalApplicationStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface HospitalApplication {
+  id: string;
+  hospitalName: string;
+  contactName: string;
+  contactPhone: string;
+  addressText: string;
+  location: Location;
+  specialties: EmergencyCondition[];
+  totalBeds: number;
+  status: HospitalApplicationStatus;
+  createdAt: string;
+  reviewedAt: string | null;
 }
 
 export interface Trip {
@@ -174,8 +193,22 @@ export interface CreateIncidentPayload {
   phone: string;
   condition: EmergencyCondition;
   priority: IncidentPriority;
+  addressText: string;
+  landmark: string;
+  locationSource: string;
   latitude: number;
   longitude: number;
+}
+
+export interface CreateHospitalApplicationPayload {
+  hospitalName: string;
+  contactName: string;
+  contactPhone: string;
+  addressText: string;
+  latitude: number;
+  longitude: number;
+  specialties: EmergencyCondition[];
+  totalBeds: number;
 }
 
 export interface UpdateAmbulanceLocationPayload {

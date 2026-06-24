@@ -25,12 +25,15 @@ import {
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet';
 import {
   acknowledgeNotification,
+  approveHospitalApplication,
   clearAuthToken,
+  createHospitalApplication,
   createIncident,
   dispatchIncident,
   getAuditEvents,
   getCurrentUser,
   getDashboardData,
+  getHospitalApplications,
   getPlatformServices,
   getStoredAuthToken,
   login,
@@ -47,10 +50,12 @@ import type {
   AmbulanceLocationSnapshot,
   AuthenticatedUser,
   CreateIncidentPayload,
+  CreateHospitalApplicationPayload,
   DispatchAuditRecord,
   DispatchResponse,
   EmergencyCondition,
   Hospital,
+  HospitalApplication,
   Incident,
   IncidentPriority,
   Metrics,
@@ -84,6 +89,7 @@ interface DashboardState {
   metrics: Metrics;
   notifications: Notification[];
   simulations: SimulationResult[];
+  hospitalApplications: HospitalApplication[];
 }
 
 const initialIncident: CreateIncidentPayload = {
@@ -91,8 +97,22 @@ const initialIncident: CreateIncidentPayload = {
   phone: '+91-90000-12345',
   condition: 'CARDIAC',
   priority: 'CRITICAL',
+  addressText: 'Koramangala 5th Block, Bengaluru',
+  landmark: 'Near Forum signal',
+  locationSource: 'MANUAL',
   latitude: 12.9458,
   longitude: 77.6309
+};
+
+const initialHospitalApplication: CreateHospitalApplicationPayload = {
+  hospitalName: 'New Partner Hospital',
+  contactName: 'Operations Lead',
+  contactPhone: '+91-90000-22222',
+  addressText: 'Indiranagar, Bengaluru',
+  latitude: 12.9784,
+  longitude: 77.6408,
+  specialties: ['GENERAL', 'TRAUMA'],
+  totalBeds: 20
 };
 
 const conditions: EmergencyCondition[] = ['CARDIAC', 'TRAUMA', 'PEDIATRIC', 'STROKE', 'GENERAL'];
@@ -124,6 +144,8 @@ export default function App() {
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
   const [loginForm, setLoginForm] = useState({ username: 'control.demo', password: '' });
   const [loginError, setLoginError] = useState('');
+  const [hospitalApplicationForm, setHospitalApplicationForm] = useState<CreateHospitalApplicationPayload>(initialHospitalApplication);
+  const [hospitalApplicationMessage, setHospitalApplicationMessage] = useState('');
   const [data, setData] = useState<DashboardState | null>(null);
   const [selectedIncidentId, setSelectedIncidentId] = useState('');
   const [selectedTripId, setSelectedTripId] = useState('');
@@ -137,6 +159,8 @@ export default function App() {
   const [platformServices, setPlatformServices] = useState<PlatformServiceDescriptor[]>([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [driverWatchId, setDriverWatchId] = useState<number | null>(null);
+  const [driverLocationStatus, setDriverLocationStatus] = useState('GPS sharing is off');
 
   async function load(currentUser = user, currentRole = role) {
     if (!currentUser) return;
@@ -145,7 +169,8 @@ export default function App() {
     const nextData = await getDashboardData(notificationRoleFor(nextRole), currentUser.role);
     const nextAuditEvents = currentUser.role === 'CONTROL' ? await getAuditEvents() : [];
     const nextPlatformServices = currentUser.role === 'CONTROL' ? await loadPlatformServices() : [];
-    setData(nextData);
+    const hospitalApplications = currentUser.role === 'CONTROL' ? await getHospitalApplications() : [];
+    setData({ ...nextData, hospitalApplications });
     setAuditEvents(nextAuditEvents);
     setPlatformServices(nextPlatformServices);
     setSimulationResult((current) => current ?? nextData.simulations[0] ?? null);
@@ -187,6 +212,14 @@ export default function App() {
     if (!authReady || !user) return;
     load().catch((loadError: Error) => setError(loadError.message));
   }, [authReady, role, user?.username]);
+
+  useEffect(() => {
+    return () => {
+      if (driverWatchId !== null && 'geolocation' in navigator) {
+        navigator.geolocation.clearWatch(driverWatchId);
+      }
+    };
+  }, [driverWatchId]);
 
   useEffect(() => {
     function syncPath() {
@@ -245,6 +278,11 @@ export default function App() {
     setLastDecision(null);
     setLastOutboxPublish(null);
     setSimulationResult(null);
+    if (driverWatchId !== null && 'geolocation' in navigator) {
+      navigator.geolocation.clearWatch(driverWatchId);
+    }
+    setDriverWatchId(null);
+    setDriverLocationStatus('GPS sharing is off');
     setRole('patient');
     window.history.replaceState(null, '', '/');
   }
@@ -261,6 +299,21 @@ export default function App() {
       }
     } catch (createError) {
       setError((createError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleHospitalApplicationSubmit() {
+    setBusy(true);
+    setHospitalApplicationMessage('');
+    setLoginError('');
+    try {
+      const application = await createHospitalApplication(hospitalApplicationForm);
+      setHospitalApplicationMessage(`Application ${application.id} submitted for control review.`);
+      setHospitalApplicationForm(initialHospitalApplication);
+    } catch (applicationError) {
+      setHospitalApplicationMessage((applicationError as Error).message);
     } finally {
       setBusy(false);
     }
@@ -322,6 +375,55 @@ export default function App() {
       await load();
     } catch (locationError) {
       setError((locationError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleStartDriverTracking(ambulance: Ambulance) {
+    if (!('geolocation' in navigator)) {
+      setDriverLocationStatus('Browser GPS is not available');
+      return;
+    }
+    if (driverWatchId !== null) {
+      navigator.geolocation.clearWatch(driverWatchId);
+    }
+    const watchId = navigator.geolocation.watchPosition(
+      async (position) => {
+        try {
+          await updateAmbulanceLocation(ambulance.id, {
+            latitude: Number(position.coords.latitude.toFixed(5)),
+            longitude: Number(position.coords.longitude.toFixed(5))
+          });
+          setDriverLocationStatus(`GPS shared ${new Date().toLocaleTimeString()}`);
+          await load();
+        } catch (locationError) {
+          setDriverLocationStatus((locationError as Error).message);
+        }
+      },
+      (locationError) => setDriverLocationStatus(locationError.message),
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+    );
+    setDriverWatchId(watchId);
+    setDriverLocationStatus('GPS sharing is on');
+  }
+
+  function handleStopDriverTracking() {
+    if (driverWatchId !== null && 'geolocation' in navigator) {
+      navigator.geolocation.clearWatch(driverWatchId);
+    }
+    setDriverWatchId(null);
+    setDriverLocationStatus('GPS sharing is off');
+  }
+
+  async function handleApproveHospitalApplication(applicationId: string) {
+    setBusy(true);
+    setError('');
+    try {
+      await approveHospitalApplication(applicationId);
+      await load();
+    } catch (approveError) {
+      setError((approveError as Error).message);
     } finally {
       setBusy(false);
     }
@@ -422,6 +524,10 @@ export default function App() {
         form={loginForm}
         setForm={setLoginForm}
         onLogin={handleLogin}
+        hospitalApplicationForm={hospitalApplicationForm}
+        setHospitalApplicationForm={setHospitalApplicationForm}
+        onHospitalApplicationSubmit={handleHospitalApplicationSubmit}
+        hospitalApplicationMessage={hospitalApplicationMessage}
         busy={busy}
         error={loginError}
       />
@@ -509,6 +615,10 @@ export default function App() {
           setSelectedTripId={setSelectedTripId}
           onTripStatus={handleTripStatus}
           onMoveAmbulance={handleMoveAmbulance}
+          onStartTracking={handleStartDriverTracking}
+          onStopTracking={handleStopDriverTracking}
+          trackingActive={driverWatchId !== null}
+          trackingStatus={driverLocationStatus}
           busy={busy}
         />
       )}
@@ -540,6 +650,7 @@ export default function App() {
           lastOutboxPublish={lastOutboxPublish}
           auditEvents={auditEvents}
           platformServices={platformServices}
+          onApproveHospitalApplication={handleApproveHospitalApplication}
           busy={busy}
         />
       )}
@@ -572,12 +683,20 @@ function LoginView({
   form,
   setForm,
   onLogin,
+  hospitalApplicationForm,
+  setHospitalApplicationForm,
+  onHospitalApplicationSubmit,
+  hospitalApplicationMessage,
   busy,
   error
 }: {
   form: { username: string; password: string };
   setForm: (form: { username: string; password: string }) => void;
   onLogin: () => void;
+  hospitalApplicationForm: CreateHospitalApplicationPayload;
+  setHospitalApplicationForm: (form: CreateHospitalApplicationPayload) => void;
+  onHospitalApplicationSubmit: () => void;
+  hospitalApplicationMessage: string;
   busy: boolean;
   error: string;
 }) {
@@ -623,8 +742,81 @@ function LoginView({
             </button>
           ))}
         </div>
+
+        <div className="enrollment-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Hospital Enrollment</p>
+              <h2>Join Response Network</h2>
+            </div>
+            <HospitalIcon size={18} />
+          </div>
+          <div className="create-form open">
+            <label>
+              Hospital
+              <input value={hospitalApplicationForm.hospitalName} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, hospitalName: event.target.value })} />
+            </label>
+            <label>
+              Contact
+              <input value={hospitalApplicationForm.contactName} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, contactName: event.target.value })} />
+            </label>
+            <label>
+              Phone
+              <input value={hospitalApplicationForm.contactPhone} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, contactPhone: event.target.value })} />
+            </label>
+            <label>
+              Address
+              <input value={hospitalApplicationForm.addressText} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, addressText: event.target.value })} />
+            </label>
+            <div className="coordinate-grid">
+              <label>
+                Lat
+                <input type="number" value={hospitalApplicationForm.latitude} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, latitude: Number(event.target.value) })} />
+              </label>
+              <label>
+                Lng
+                <input type="number" value={hospitalApplicationForm.longitude} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, longitude: Number(event.target.value) })} />
+              </label>
+            </div>
+            <SpecialtyPicker
+              selected={hospitalApplicationForm.specialties}
+              onChange={(specialties) => setHospitalApplicationForm({ ...hospitalApplicationForm, specialties })}
+            />
+            <label>
+              Beds
+              <input type="number" min={1} value={hospitalApplicationForm.totalBeds} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, totalBeds: Number(event.target.value) })} />
+            </label>
+            <button className="secondary-button" type="button" onClick={onHospitalApplicationSubmit} disabled={busy}>
+              Submit for Review
+            </button>
+            {hospitalApplicationMessage && <p className="form-note">{hospitalApplicationMessage}</p>}
+          </div>
+        </div>
       </section>
     </main>
+  );
+}
+
+function SpecialtyPicker({ selected, onChange }: { selected: EmergencyCondition[]; onChange: (selected: EmergencyCondition[]) => void }) {
+  return (
+    <div className="specialty-picker">
+      <span>Specialties</span>
+      <div>
+        {conditions.map((condition) => {
+          const checked = selected.includes(condition);
+          return (
+            <label key={condition} className={`chip-checkbox ${checked ? 'checked' : ''}`}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onChange(checked ? selected.filter((item) => item !== condition) : [...selected, condition])}
+              />
+              {condition}
+            </label>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -832,6 +1024,10 @@ function DriverView({
   setSelectedTripId,
   onTripStatus,
   onMoveAmbulance,
+  onStartTracking,
+  onStopTracking,
+  trackingActive,
+  trackingStatus,
   busy
 }: {
   data: DashboardState | null;
@@ -839,6 +1035,10 @@ function DriverView({
   setSelectedTripId: (id: string) => void;
   onTripStatus: (tripId: string, status: TripStatus) => void;
   onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
+  onStartTracking: (ambulance: Ambulance) => void;
+  onStopTracking: () => void;
+  trackingActive: boolean;
+  trackingStatus: string;
   busy: boolean;
 }) {
   const selectedTrip = data?.trips.find((trip) => trip.id === selectedTripId) ?? null;
@@ -863,6 +1063,10 @@ function DriverView({
             liveLocation={data?.liveLocations.find((location) => location.ambulanceId === ownAmbulance.id) ?? null}
             activeTrip={selectedTrip}
             onMoveAmbulance={onMoveAmbulance}
+            onStartTracking={onStartTracking}
+            onStopTracking={onStopTracking}
+            trackingActive={trackingActive}
+            trackingStatus={trackingStatus}
             busy={busy}
           />
         ) : (
@@ -940,12 +1144,20 @@ function DriverUnitPanel({
   liveLocation,
   activeTrip,
   onMoveAmbulance,
+  onStartTracking,
+  onStopTracking,
+  trackingActive,
+  trackingStatus,
   busy
 }: {
   ambulance: Ambulance;
   liveLocation: AmbulanceLocationSnapshot | null;
   activeTrip: Trip | null;
   onMoveAmbulance: (ambulance: Ambulance, deltaLatitude: number, deltaLongitude: number) => void;
+  onStartTracking: (ambulance: Ambulance) => void;
+  onStopTracking: () => void;
+  trackingActive: boolean;
+  trackingStatus: string;
   busy: boolean;
 }) {
   return (
@@ -960,6 +1172,16 @@ function DriverUnitPanel({
       <InfoLine label="Station" value={ambulance.baseStation} />
       <InfoLine label="Location" value={liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : 'Base snapshot'} />
       {activeTrip && <InfoLine label="Current Trip" value={activeTrip.id} />}
+      <div className="gps-controls">
+        <button className="secondary-button" type="button" onClick={() => onStartTracking(ambulance)} disabled={busy || trackingActive}>
+          <Navigation size={15} />
+          Start GPS
+        </button>
+        <button className="ghost-button" type="button" onClick={onStopTracking} disabled={!trackingActive}>
+          Stop
+        </button>
+      </div>
+      <p className="form-note">{trackingStatus}</p>
       <LiveAmbulanceRow ambulance={ambulance} liveLocation={liveLocation} onMoveAmbulance={onMoveAmbulance} busy={busy} />
     </div>
   );
@@ -1107,6 +1329,7 @@ function ControlView({
   lastOutboxPublish,
   auditEvents,
   platformServices,
+  onApproveHospitalApplication,
   busy
 }: {
   data: DashboardState | null;
@@ -1124,6 +1347,7 @@ function ControlView({
   lastOutboxPublish: OutboxPublishResponse | null;
   auditEvents: SecurityAuditEvent[];
   platformServices: PlatformServiceDescriptor[];
+  onApproveHospitalApplication: (applicationId: string) => void;
   busy: boolean;
 }) {
   return (
@@ -1235,6 +1459,18 @@ function ControlView({
           ))}
         </div>
 
+        <ActiveAmbulancePanel
+          ambulances={data?.ambulances ?? []}
+          liveLocations={data?.liveLocations ?? []}
+          trips={data?.trips ?? []}
+        />
+
+        <HospitalApplicationsPanel
+          applications={data?.hospitalApplications ?? []}
+          onApprove={onApproveHospitalApplication}
+          busy={busy}
+        />
+
         <OutboxPanel
           pending={data?.metrics.pendingOutboxEvents ?? 0}
           published={data?.metrics.publishedOutboxEvents ?? 0}
@@ -1252,6 +1488,70 @@ function ControlView({
         <PlatformServicesPanel services={platformServices} />
       </aside>
     </section>
+  );
+}
+
+function ActiveAmbulancePanel({
+  ambulances,
+  liveLocations,
+  trips
+}: {
+  ambulances: Ambulance[];
+  liveLocations: AmbulanceLocationSnapshot[];
+  trips: Trip[];
+}) {
+  const activeTripAmbulanceIds = new Set(trips.filter((trip) => activeTripStatuses.includes(trip.status)).map((trip) => trip.ambulanceId));
+  const activeAmbulances = ambulances.filter((ambulance) => {
+    const liveLocation = liveLocations.find((location) => location.ambulanceId === ambulance.id);
+    return activeTripAmbulanceIds.has(ambulance.id) || Boolean(liveLocation && Date.now() - new Date(liveLocation.updatedAt).getTime() < 180000);
+  });
+
+  return (
+    <div className="compact-list bordered">
+      <h3>Active Ambulances</h3>
+      {activeAmbulances.length === 0 && <div className="empty-state compact">No fresh active units</div>}
+      {activeAmbulances.slice(0, 6).map((ambulance) => {
+        const liveLocation = liveLocations.find((location) => location.ambulanceId === ambulance.id);
+        return (
+          <div className="compact-row" key={ambulance.id}>
+            <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
+            <span>
+              <strong>{ambulance.callSign}</strong>
+              <small>{activeTripAmbulanceIds.has(ambulance.id) ? 'Assigned trip' : `Fresh ${formatRelativeTime(liveLocation!.updatedAt)}`}</small>
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function HospitalApplicationsPanel({
+  applications,
+  onApprove,
+  busy
+}: {
+  applications: HospitalApplication[];
+  onApprove: (applicationId: string) => void;
+  busy: boolean;
+}) {
+  const pending = applications.filter((application) => application.status === 'PENDING');
+  return (
+    <div className="compact-list bordered">
+      <h3>Hospital Applications</h3>
+      {pending.length === 0 && <div className="empty-state compact">No pending hospital applications</div>}
+      {pending.map((application) => (
+        <article className="application-row" key={application.id}>
+          <span>
+            <strong>{application.hospitalName}</strong>
+            <small>{application.totalBeds} beds - {application.specialties.join(', ')}</small>
+          </span>
+          <button className="ghost-button" type="button" onClick={() => onApprove(application.id)} disabled={busy}>
+            Approve
+          </button>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -1310,6 +1610,9 @@ function SimulationView({
     condition: assignment.condition,
     priority: assignment.priority,
     location: assignment.incidentLocation,
+    addressText: `Simulation address for ${assignment.incidentId}`,
+    landmark: '',
+    locationSource: 'SIMULATION',
     createdAt: result?.createdAt ?? new Date().toISOString(),
     status: assignment.matched ? 'ASSIGNED' : 'NEW'
   }));
@@ -1524,6 +1827,21 @@ function IncidentForm({
   busy: boolean;
   submitLabel: string;
 }) {
+  function useCurrentLocation() {
+    if (!('geolocation' in navigator)) {
+      setForm({ ...form, locationSource: 'MANUAL' });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition((position) => {
+      setForm({
+        ...form,
+        latitude: Number(position.coords.latitude.toFixed(5)),
+        longitude: Number(position.coords.longitude.toFixed(5)),
+        locationSource: 'GPS'
+      });
+    });
+  }
+
   return (
     <div className="create-form open">
       <label>
@@ -1546,6 +1864,21 @@ function IncidentForm({
           {priorities.map((priority) => <option key={priority} value={priority}>{priority}</option>)}
         </select>
       </label>
+      <label>
+        Address
+        <input value={form.addressText} onChange={(event) => setForm({ ...form, addressText: event.target.value, locationSource: form.locationSource || 'MANUAL' })} />
+      </label>
+      <label>
+        Landmark
+        <input value={form.landmark} onChange={(event) => setForm({ ...form, landmark: event.target.value })} />
+      </label>
+      <div className="location-source-row">
+        <span>{form.locationSource}</span>
+        <button className="ghost-button" type="button" onClick={useCurrentLocation}>
+          <Navigation size={15} />
+          Use Current Location
+        </button>
+      </div>
       <div className="coordinate-grid">
         <label>
           Lat
