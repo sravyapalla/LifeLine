@@ -20,9 +20,47 @@ LifeLine is intentionally role-specific. The four operational users should not s
 | Hospital | What is incoming, what capacity do we have, and when should we declare exhaustion? | Incoming ambulance board, capacity controls, clinical load indicators |
 | Control | What is happening across the city and what needs intervention? | Incident queue, dispatch, reroute, live map, reliability, audit, simulation |
 
+## Architecture Strategy: Modular Monolith First, Microservices Ready
+
+LifeLine intentionally starts as a **modular monolith** for the core emergency workflow, while keeping clear bounded contexts and deployable service shells for a later microservices migration.
+
+This is a deliberate system design decision, not a shortcut. Emergency dispatch requires strong consistency across incident assignment, ambulance reservation, hospital bed reservation, trip creation, audit logging, and outbox event creation. Keeping that workflow inside one transactional backend avoids premature distributed transactions while the domain model is still evolving.
+
+The system is still **microservices-ready**:
+
+- the code is organized around bounded contexts;
+- the gateway is already the browser-facing API boundary;
+- outbox events are already published through Kafka;
+- Redis is already isolated for live ambulance projections;
+- service shells exist for future extraction;
+- deployment manifests already model separate runtime components.
+
+The intended migration path is a **strangler pattern**: keep the operations backend as the source-compatible system of record, then extract services only when their data ownership, scaling needs, and API contracts are stable.
+
+### Why Not Pure Microservices First?
+
+| Concern | Microservices First Cost | LifeLine Decision |
+| --- | --- | --- |
+| Dispatch reservation | Requires distributed consistency across incident, ambulance, hospital, trip, audit, and events | Keep reservation transactional in the operations backend |
+| Domain volatility | Early service contracts would churn as product flows change | Stabilize bounded contexts first |
+| Local development | Many services, brokers, databases, and network failure modes become mandatory | Keep one productive backend loop plus optional full runtime |
+| Team size | Microservices increase operational load before the product is proven | Defer extraction until ownership is clear |
+| Reliability | Retries, idempotency, sagas, DLQs, tracing, and versioned APIs become required immediately | Add these patterns incrementally around real workflows |
+
+### Where Microservices Make Sense Later
+
+| Candidate Service | Extraction Trigger |
+| --- | --- |
+| Live location ingestion | High-frequency GPS writes need independent scaling and retention |
+| Notification delivery | SMS/email/push providers need async retries and provider isolation |
+| Simulation | Surge planning becomes compute-heavy and should not contend with live dispatch |
+| Audit | Immutable audit retention and compliance policies diverge from operational data |
+| Routing | OSRM/GraphHopper or vendor routing needs separate caching, limits, and failover |
+| Resource management | Hospital capacity and fleet state APIs stabilize and need separate ownership |
+
 ## System Architecture
 
-LifeLine uses a distributed service architecture with a practical migration path. The existing backend remains the operational source while V7 introduces deployable service boundaries and a gateway so the system can be split without rewriting product behavior.
+LifeLine currently runs as a modular operations backend behind a gateway, with supporting infrastructure and future service boundaries. The gateway and service shells make the target architecture visible without forcing premature extraction.
 
 ```text
 Browser
@@ -40,22 +78,30 @@ Gateway Service
   Service discovery endpoint
   API routing
         |
-        +-------------------+-------------------+-------------------+
-        |                   |                   |                   |
-        v                   v                   v                   v
-Operations Service     Incident Service    Resource Service    Dispatch Service
-current Spring app     intake boundary      fleet/capacity      matching/routing
-        |                   |                   |                   |
-        +-------------------+-------------------+-------------------+
-                            |
-                            v
-                     Event and Data Plane
-        PostgreSQL/PostGIS  Redis  Kafka  Audit  Notifications  Simulations
+        v
+Operations Backend
+  Modular monolith with bounded contexts
+    Auth and Trust
+    Incident
+    Resource
+    Dispatch
+    Trip
+    Notification
+    Audit
+    Simulation
+        |
+        v
+Event and Data Plane
+  PostgreSQL/PostGIS  Redis  Kafka
+        |
+        v
+Future Extracted Services
+  Incident  Resource  Dispatch  Notification  Audit  Simulation
 ```
 
-### Service Boundaries
+### Bounded Contexts
 
-| Service | Owns | Why It Is Separate |
+| Context | Owns | Why It Is A Boundary |
 | --- | --- | --- |
 | Gateway | Public API routing, CORS, frontend-facing service registry | Keeps browsers away from internal service topology and gives one place for edge policy |
 | Auth and Trust | JWT verification, user context, RBAC, audit decisions | Trust rules must be consistent and centrally testable |
@@ -67,7 +113,18 @@ current Spring app     intake boundary      fleet/capacity      matching/routing
 | Audit | Security and workflow audit events | Immutable trust records should not be coupled to UI concerns |
 | Simulation | Surge generation, optimizer comparison, replay history | Planning workloads are heavy and should not interfere with live dispatch |
 
-V7 keeps a strangler-style transition: the gateway can route to the current operations backend while new service shells are deployed and verified. The important engineering decision is that API contracts, data ownership, and runtime deployment are explicit now, so future extraction is a move with contract tests rather than a rewrite.
+The current implementation keeps these contexts inside the operations backend. The service shells in `services/` are deployable placeholders for the future target architecture, not a claim that every context is already independently owned.
+
+### Service Extraction Roadmap
+
+| Phase | Goal | Result |
+| --- | --- | --- |
+| 1. Modular monolith | Keep emergency reservation workflows strongly consistent | Fast iteration and fewer distributed failure modes |
+| 2. Gateway boundary | Make one browser-facing API and hide internal topology | Frontend remains stable during backend evolution |
+| 3. Event contracts | Publish durable workflow events from the outbox | Other services can subscribe without coupling to transactions |
+| 4. Read-model extraction | Move notifications, audit views, and simulation history first | Low-risk services leave the monolith before core writes |
+| 5. Resource extraction | Move ambulance, hospital, live location, and capacity APIs | Resource scaling separates from dispatch logic |
+| 6. Dispatch extraction | Move scoring/reservation only after saga/idempotency patterns are mature | Core matching can scale independently without losing correctness |
 
 ## Product Flows
 
@@ -105,6 +162,43 @@ Control Tower now separates active ambulances from the full fleet. A unit is act
 | Security audit | PostgreSQL/PostGIS or memory profile | Login, denied access, dispatch, reroute, capacity, publish, simulation, ack |
 | Simulation runs | PostgreSQL/PostGIS or memory profile | Deterministic scenario history and strategy comparison |
 
+### Consistency Model
+
+LifeLine uses different consistency models for different types of data:
+
+| Workflow | Consistency Requirement | Design |
+| --- | --- | --- |
+| Dispatch reservation | Strong consistency | Incident status, ambulance reservation, hospital bed decrement, trip creation, dispatch audit, and outbox insert happen in one transaction |
+| Hospital capacity updates | Strong consistency | Capacity is authoritative in PostgreSQL and audited |
+| Live ambulance location | Eventual freshness | Redis stores short-lived location snapshots with TTL; dispatch falls back to persisted fleet location |
+| Notifications | Eventually consistent | Generated from workflow events and acknowledged independently |
+| Audit | Append-first trust record | Security and workflow decisions are recorded as immutable audit events |
+| Simulation | Isolated planning data | Scenario runs do not mutate operational resources |
+
+The design avoids pretending every state update has the same consistency needs. Durable operational decisions use PostgreSQL transactions. High-frequency live movement uses Redis. Cross-boundary communication uses outbox events.
+
+### Core Transaction Boundary
+
+The most important transaction is dispatch:
+
+```text
+1. Lock incident.
+2. Lock selected ambulance.
+3. Lock selected hospital.
+4. Validate incident is still dispatchable.
+5. Validate ambulance is still available and capable.
+6. Validate hospital can treat the condition and has capacity.
+7. Reserve ambulance.
+8. Decrement hospital bed availability.
+9. Mark incident assigned.
+10. Create trip.
+11. Store dispatch decision and candidate scores.
+12. Insert outbox event.
+13. Commit.
+```
+
+This is why the dispatch core stays in the modular monolith until service extraction has mature saga, idempotency, and reconciliation patterns.
+
 ## Dispatch Design
 
 Dispatch is built around explicit hard constraints followed by explainable scoring.
@@ -141,11 +235,41 @@ The global optimizer is capped for exact comparison. That keeps it deterministic
 
 ## Security Model
 
-LifeLine uses local JWT authentication for a self-contained demo and keeps external OAuth plug-in-ready for a later production integration.
+LifeLine separates **identity** from **application authorization**.
 
-### Demo Users
+An identity provider answers: who is this person?
 
-Set `LIFELINE_DEMO_PASSWORD` locally and use it with these demo accounts:
+LifeLine answers: what role, approval status, hospital, ambulance, and data scope does this person have?
+
+The current runnable implementation uses local JWT authentication so the project works without third-party setup. The production direction is OAuth/OIDC with Google, Microsoft, Auth0, Clerk, Firebase, or another managed identity provider. OAuth should map into LifeLine-owned user profiles rather than replacing LifeLine authorization.
+
+```text
+OAuth/OIDC Provider
+  email, subject, verified identity
+        |
+        v
+LifeLine User Profile
+  role, approval status, ambulance scope, hospital scope
+        |
+        v
+Backend RBAC
+  API authorization, PII masking, audit
+```
+
+### Signup And Approval Model
+
+| User Type | Signup | Approval | Operational Scope |
+| --- | --- | --- | --- |
+| Patient | Self-service | Immediate | Own incidents, own trips, own notifications |
+| Driver | Self-service application | Control approval required | Assigned ambulance and assigned trips |
+| Hospital | Hospital enrollment | Control approval required | Own hospital capacity and incoming trips |
+| Control | Invite/admin provisioned only | Admin controlled | Full operational and audit access |
+
+This prevents public signup from creating privileged operational users. A driver or hospital can authenticate before approval, but should not receive operational access until Control approves the profile.
+
+### Local Development Users
+
+For local development, set `LIFELINE_DEMO_PASSWORD` and use the seeded accounts below. These users are a development convenience only; the product model is signup plus approval for operational roles.
 
 | Username | Role | Scope |
 | --- | --- | --- |
@@ -155,6 +279,8 @@ Set `LIFELINE_DEMO_PASSWORD` locally and use it with these demo accounts:
 | `control.demo` | `CONTROL` | Full operational access |
 
 JWT claims include `sub`, `role`, optional `ambulanceId`, optional `hospitalId`, `iat`, and `exp`.
+
+Production OAuth would add or map claims such as provider, provider subject, verified email, and organization membership, while keeping role and resource scope owned by LifeLine.
 
 ### RBAC Matrix
 
@@ -195,6 +321,45 @@ LifeLine uses a transactional outbox before Kafka publishing:
 
 This design avoids losing events when the database succeeds but the broker or downstream service is temporarily unavailable.
 
+### Event Contracts
+
+Current and planned events:
+
+| Event | Producer | Consumers |
+| --- | --- | --- |
+| `incident.created` | Incident workflow | Notification, control timeline, future incident service read models |
+| `dispatch.assigned` | Dispatch workflow | Patient tracking, driver assignment, hospital receiving board |
+| `trip.status.updated` | Trip workflow | Patient tracking, hospital board, audit/timeline |
+| `trip.rerouted` | Dispatch workflow | Driver, hospital, control, notification |
+| `hospital.capacity.updated` | Resource workflow | Control, dispatch eligibility, simulation baselines |
+| `ambulance.location.updated` | Driver/resource workflow | Maps, dispatch ETA, active ambulance projection |
+| `hospital.application.submitted` | Onboarding workflow | Control approval queue |
+| `hospital.application.approved` | Control workflow | Resource catalog, audit, notification |
+
+### Reliability Patterns
+
+| Pattern | Current State | Next Hardening Step |
+| --- | --- | --- |
+| Transactional outbox | Implemented | Add consumer inbox table for exactly-once consumer effects |
+| Retry state | Implemented for publisher attempts | Add dead-letter topic policy and operator replay |
+| Idempotency | Partially implicit through resource state checks | Add explicit `Idempotency-Key` for create incident, dispatch, and trip status updates |
+| Correlation IDs | Not yet first-class | Add `X-Correlation-Id` at gateway and propagate through logs, audit, and events |
+| Routing failover | Deterministic provider exists | Add circuit breaker and cached fallback around OSRM/GraphHopper later |
+| Backpressure | Not yet explicit | Add rate limits for public signup, incident creation, and GPS updates |
+| Reconciliation | Manual through visible state | Add scheduled checks for stuck trips, stale live locations, and pending outbox age |
+
+### Failure Mode Thinking
+
+| Failure | Expected Behavior |
+| --- | --- |
+| Kafka unavailable | Core transaction still commits; outbox event remains pending with retry state |
+| Redis unavailable | Dispatch and map views fall back to persisted ambulance locations |
+| Hospital capacity changes during dispatch | Transaction lock and validation prevent over-reservation |
+| Ambulance becomes unavailable during dispatch | Transaction validation rejects the candidate |
+| Routing provider unavailable | Deterministic straight-line provider remains a fallback |
+| Notification delivery fails | Operational workflow is not blocked; notification can retry asynchronously |
+| Duplicate client request | Future idempotency key should return the original result instead of duplicating work |
+
 ## Runtime Components
 
 | Component | Default Port | Purpose |
@@ -219,7 +384,7 @@ backend/                 Operations service with authenticated workflow APIs
 frontend/                React role app for patient, driver, hospital, control, and simulation
 services/                Gateway plus bounded-context service shells
 deploy/k8s/              Kubernetes deployment baseline
-scripts/verify-v7.ps1    Local verification entry point
+scripts/verify.ps1       Local verification entry point
 docker-compose.yml       Full local distributed runtime
 ```
 
@@ -291,6 +456,7 @@ The memory profile keeps the outbox publisher in logging mode and uses an in-mem
 ### Auth
 
 - `POST /api/auth/login`
+- `POST /api/auth/signup`
 - `GET /api/auth/me`
 
 ### Operations
@@ -300,6 +466,9 @@ The memory profile keeps the outbox publisher in logging mode and uses an in-mem
 - `GET /api/ambulance-locations`
 - `GET /api/hospitals`
 - `POST /api/hospitals/{hospitalId}/capacity`
+- `POST /api/hospital-applications`
+- `GET /api/hospital-applications`
+- `POST /api/hospital-applications/{applicationId}/approve`
 - `GET /api/incidents`
 - `POST /api/incidents`
 - `GET /api/trips`
@@ -330,15 +499,37 @@ The memory profile keeps the outbox publisher in logging mode and uses an in-mem
 
 ## Deployment Direction
 
-V7 targets a production-ready local and container deployment shape:
+LifeLine targets a production-ready local and container deployment shape:
 
 - Docker Compose for full local orchestration.
 - A gateway service as the only browser-facing API.
-- Separate deployable service boundaries for incident, resource, dispatch, notification, audit, and simulation.
+- A modular operations backend with separate deployable service shells for the future target architecture.
 - Kubernetes manifests for a cloud-ready baseline.
 - Environment-driven secrets.
 - Health endpoints for every service.
 - PostgreSQL, Redis, and Kafka as explicit infrastructure dependencies.
+
+### Environment Strategy
+
+| Environment | Purpose | Runtime Shape |
+| --- | --- | --- |
+| Memory profile | Fast backend tests and lightweight demos | In-memory store, logging outbox publisher, no Docker required |
+| Local full stack | End-to-end development | Docker Compose with PostgreSQL/PostGIS, Redis, Kafka, gateway, backend, frontend |
+| Staging | Production-like validation | Container images, managed or containerized dependencies, real secrets, seeded test data |
+| Production | Real operations | Managed database/cache/broker, OAuth/OIDC, TLS, observability, backups, rollback |
+
+### Production Hardening Roadmap
+
+| Area | Next Improvement |
+| --- | --- |
+| Secrets | Move from `.env` and Kubernetes example secrets to a platform secret manager |
+| Images | Use immutable image tags instead of `latest` |
+| Migrations | Run Flyway as an explicit deployment step or init job |
+| Observability | Add structured logs, tracing, correlation IDs, and dashboard-ready metrics |
+| Ingress | Add TLS termination, WAF/rate limits, and CORS by environment |
+| Resilience | Add circuit breakers, retry budgets, and dead-letter event handling |
+| Backups | Define PostgreSQL backup, restore, and retention policy |
+| Rollback | Document app rollback and database migration rollback strategy |
 
 ### Kubernetes
 
@@ -376,17 +567,45 @@ Recommended production hardening beyond this repository:
 | D03 | PostgreSQL/PostGIS as the source of truth | Incidents, ambulances, hospitals, trips, audit, and simulation runs are durable geospatial records |
 | D04 | Redis only for live projections | Ambulance movement is high-frequency and ephemeral, so TTL state belongs outside durable records |
 | D05 | Kafka behind a transactional outbox | State changes must not be lost when event publishing fails |
-| D06 | Gateway first for microservices | Browsers should depend on one public API boundary while services evolve internally |
-| D07 | Strangler migration over big-bang rewrite | The current backend works; service extraction should preserve behavior while boundaries become deployable |
-| D08 | Backend-enforced RBAC | The API is the trust boundary; frontend route hiding is only UX |
-| D09 | PII masking at response mapping | Domain logic keeps needed data while each role receives the least data required |
-| D10 | Audit allowed and denied actions | Trust requires visibility into both successful sensitive actions and blocked attempts |
-| D11 | Routing provider abstraction | Dispatch should depend on route estimates, not a specific vendor or engine |
-| D12 | Explainable dispatch before opaque ML | Emergency workflows need deterministic, auditable decisions before assistive prediction |
-| D13 | Global optimization as simulator comparison | Batch optimization teaches tradeoffs without replacing real-time dispatch prematurely |
-| D14 | Role-specific UI surfaces | A patient, driver, hospital operator, and control tower need different mental models and workflows |
-| D15 | Environment-driven secrets | Demo convenience must not require committed credentials |
-| D16 | Health endpoints everywhere | Distributed systems need fast runtime inspection and deployability checks |
+| D06 | Modular monolith first | Dispatch reservation needs strong consistency while the domain is still changing |
+| D07 | Gateway first, services later | Browsers should depend on one public API boundary while internals evolve |
+| D08 | Strangler migration over big-bang rewrite | Service extraction should preserve behavior while contracts mature |
+| D09 | Backend-enforced RBAC | The API is the trust boundary; frontend route hiding is only UX |
+| D10 | PII masking at response mapping | Domain logic keeps needed data while each role receives the least data required |
+| D11 | Audit allowed and denied actions | Trust requires visibility into both successful sensitive actions and blocked attempts |
+| D12 | Routing provider abstraction | Dispatch should depend on route estimates, not a specific vendor or engine |
+| D13 | Explainable dispatch before opaque ML | Emergency workflows need deterministic, auditable decisions before assistive prediction |
+| D14 | Global optimization as simulator comparison | Batch optimization teaches tradeoffs without replacing real-time dispatch prematurely |
+| D15 | Role-specific UI surfaces | A patient, driver, hospital operator, and control tower need different mental models and workflows |
+| D16 | Environment-driven secrets | Demo convenience must not require committed credentials |
+| D17 | Health endpoints everywhere | Distributed systems need fast runtime inspection and deployability checks |
+| D18 | OAuth maps to app profiles | Identity provider claims should not replace LifeLine role, approval, and resource-scope policy |
+| D19 | Approval for operational roles | Driver, hospital, and control access can affect emergency operations and must not be self-granted |
+| D20 | Simulation isolated from live operations | Planning scenarios should explain tradeoffs without mutating real operational resources |
+
+### System Design Tradeoffs
+
+| Tradeoff | Choice | Why |
+| --- | --- | --- |
+| Strong consistency vs availability during dispatch | Prefer consistency | Over-reserving an ambulance or hospital bed is worse than rejecting and retrying a dispatch |
+| Real-time GPS durability | Prefer ephemeral Redis projection | Live location is valuable when fresh and misleading when stale |
+| Immediate microservices vs modular monolith | Prefer modular monolith now | The core workflow is transaction-heavy and still evolving |
+| External auth now vs self-contained runtime | Keep local auth with OAuth-ready boundary | The project remains runnable while preserving the correct production direction |
+| Algorithmic optimality vs explainability | Prefer explainable deterministic scoring | Operators need to understand and defend emergency decisions |
+| UI reuse vs role-specific UX | Prefer role-specific UX | Each role has different risk, urgency, and data visibility needs |
+
+### Future Architecture Work
+
+The highest-value future improvements are:
+
+1. Add correlation IDs through gateway, backend logs, audit events, and Kafka messages.
+2. Add idempotency keys for incident creation, dispatch, trip status updates, and hospital capacity updates.
+3. Add consumer inbox tables before event consumers mutate durable state.
+4. Replace local auth with OAuth/OIDC while preserving LifeLine-owned profiles and RBAC.
+5. Extract notification and audit read models first because they are lower-risk consumers of workflow events.
+6. Add OSRM or GraphHopper behind the routing provider with circuit breaker fallback.
+7. Add service-level dashboards for outbox age, publish failures, GPS freshness, dispatch latency, and hospital exhaustion.
+8. Add tenant/organization boundaries for multi-hospital networks and ambulance operators.
 
 ## Testing
 
@@ -407,7 +626,7 @@ npm.cmd run build
 Full local verification:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File scripts\verify-v7.ps1 -SkipDockerConfig
+powershell.exe -ExecutionPolicy Bypass -File scripts\verify.ps1 -SkipDockerConfig
 ```
 
 Run without `-SkipDockerConfig` on a machine with Docker installed to include `docker compose config`.

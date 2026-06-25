@@ -264,12 +264,20 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface SignupRequest {
+  email: string;
+  displayName: string;
+  password: string;
+  role: Exclude<UserRole, 'CONTROL'>;
+}
+
 export interface AuthenticatedUser {
   username: string;
   displayName: string;
   role: UserRole;
   ambulanceId: string | null;
   hospitalId: string | null;
+  status: string;
 }
 
 export interface AuthResponse {

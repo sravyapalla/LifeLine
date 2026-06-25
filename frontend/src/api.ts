@@ -19,6 +19,7 @@ import type {
   OutboxSummary,
   PlatformServicesResponse,
   SecurityAuditEvent,
+  SignupRequest,
   SimulationRequestPayload,
   SimulationResult,
   Trip,
@@ -81,6 +82,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export async function login(payload: LoginRequest) {
   const response = await request<AuthResponse>('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  setAuthToken(response.token);
+  return response;
+}
+
+export async function signup(payload: SignupRequest) {
+  const response = await request<AuthResponse>('/auth/signup', {
     method: 'POST',
     body: JSON.stringify(payload)
   });
