@@ -41,6 +41,7 @@ import {
   rerouteTrip,
   resetDemo,
   runSimulation,
+  signup,
   updateAmbulanceLocation,
   updateHospitalCapacity,
   updateTripStatus
@@ -71,6 +72,7 @@ import type {
   SimulationResult,
   SimulationStrategyResult,
   SecurityAuditEvent,
+  SignupRequest,
   Trip,
   TripStatus
 } from './types';
@@ -142,7 +144,8 @@ export default function App() {
   const [role, setRole] = useState<Role>(() => roleFromPath(window.location.pathname));
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
-  const [loginForm, setLoginForm] = useState({ username: 'control.demo', password: '' });
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [signupForm, setSignupForm] = useState<SignupRequest>({ email: '', displayName: '', password: '', role: 'PATIENT' });
   const [loginError, setLoginError] = useState('');
   const [hospitalApplicationForm, setHospitalApplicationForm] = useState<CreateHospitalApplicationPayload>(initialHospitalApplication);
   const [hospitalApplicationMessage, setHospitalApplicationMessage] = useState('');
@@ -254,6 +257,31 @@ export default function App() {
     setLoginError('');
     try {
       const response = await login(loginForm);
+      const nextRole = roleFromPath(window.location.pathname, response.user);
+      setUser(response.user);
+      setRole(nextRole);
+      setError('');
+      window.history.replaceState(null, '', rolePath(nextRole));
+    } catch (authError) {
+      setLoginError((authError as Error).message);
+    } finally {
+      setBusy(false);
+      setAuthReady(true);
+    }
+  }
+
+  async function handleSignup() {
+    setBusy(true);
+    setLoginError('');
+    try {
+      const response = await signup(signupForm);
+      if (signupForm.role === 'HOSPITAL') {
+        await createHospitalApplication({
+          ...hospitalApplicationForm,
+          contactName: hospitalApplicationForm.contactName || signupForm.displayName,
+          contactPhone: hospitalApplicationForm.contactPhone
+        });
+      }
       const nextRole = roleFromPath(window.location.pathname, response.user);
       setUser(response.user);
       setRole(nextRole);
@@ -524,6 +552,9 @@ export default function App() {
         form={loginForm}
         setForm={setLoginForm}
         onLogin={handleLogin}
+        signupForm={signupForm}
+        setSignupForm={setSignupForm}
+        onSignup={handleSignup}
         hospitalApplicationForm={hospitalApplicationForm}
         setHospitalApplicationForm={setHospitalApplicationForm}
         onHospitalApplicationSubmit={handleHospitalApplicationSubmit}
@@ -538,8 +569,8 @@ export default function App() {
     <main className="shell">
       <header className="topbar">
         <div className="brand-block">
-          <p className="eyebrow">LifeLine V6</p>
-          <h1>Production Trust</h1>
+          <p className="eyebrow">Emergency Response</p>
+          <h1>LifeLine</h1>
         </div>
 
         <nav className="role-tabs" aria-label="Role navigation">
@@ -576,18 +607,20 @@ export default function App() {
 
       {error && <div className="alert">{error}</div>}
 
-      <section className="metrics-grid">
-        <MetricCard icon={<Siren size={18} />} label="Open" value={metrics?.openIncidents ?? 0} tone="red" />
-        <MetricCard icon={<AmbulanceIcon size={18} />} label="Available" value={metrics?.availableAmbulances ?? 0} tone="green" />
-        <MetricCard icon={<Route size={18} />} label="Active Trips" value={activeTrips.length} tone="blue" />
-        <MetricCard icon={<Bed size={18} />} label="Bed Avg" value={`${metrics?.averageBedAvailabilityPercent ?? 0}%`} tone="amber" />
-        <MetricCard icon={<ClipboardList size={18} />} label="Pending Events" value={metrics?.pendingOutboxEvents ?? 0} tone="violet" />
-        <MetricCard icon={<Activity size={18} />} label="Sim Runs" value={metrics?.simulationRuns ?? data?.simulations.length ?? 0} tone="blue" />
-        <MetricCard icon={<Route size={18} />} label="Opt Gain" value={`${metrics?.latestOptimizationImprovementPercent ?? 0}%`} tone="green" />
-        <MetricCard icon={<MapPin size={18} />} label="Live Locs" value={metrics?.liveAmbulanceLocations ?? 0} tone="amber" />
-        <MetricCard icon={<BellPlus size={18} />} label="Notify" value={metrics?.notificationBacklog ?? 0} tone="red" />
-        <MetricCard icon={<RadioTower size={18} />} label="Kafka Fail" value={metrics?.kafkaPublishFailures ?? 0} tone="violet" />
-      </section>
+      {user.role === 'CONTROL' && (
+        <section className="metrics-grid">
+          <MetricCard icon={<Siren size={18} />} label="Open" value={metrics?.openIncidents ?? 0} tone="red" />
+          <MetricCard icon={<AmbulanceIcon size={18} />} label="Available" value={metrics?.availableAmbulances ?? 0} tone="green" />
+          <MetricCard icon={<Route size={18} />} label="Active Trips" value={activeTrips.length} tone="blue" />
+          <MetricCard icon={<Bed size={18} />} label="Bed Avg" value={`${metrics?.averageBedAvailabilityPercent ?? 0}%`} tone="amber" />
+          <MetricCard icon={<ClipboardList size={18} />} label="Pending Events" value={metrics?.pendingOutboxEvents ?? 0} tone="violet" />
+          <MetricCard icon={<Activity size={18} />} label="Sim Runs" value={metrics?.simulationRuns ?? data?.simulations.length ?? 0} tone="blue" />
+          <MetricCard icon={<Route size={18} />} label="Opt Gain" value={`${metrics?.latestOptimizationImprovementPercent ?? 0}%`} tone="green" />
+          <MetricCard icon={<MapPin size={18} />} label="Live Locs" value={metrics?.liveAmbulanceLocations ?? 0} tone="amber" />
+          <MetricCard icon={<BellPlus size={18} />} label="Notify" value={metrics?.notificationBacklog ?? 0} tone="red" />
+          <MetricCard icon={<RadioTower size={18} />} label="Kafka Fail" value={metrics?.kafkaPublishFailures ?? 0} tone="violet" />
+        </section>
+      )}
 
       <NotificationPanel
         notifications={data?.notifications ?? []}
@@ -596,7 +629,9 @@ export default function App() {
         busy={busy}
       />
 
-      {role === 'patient' && (
+      {user.status !== 'APPROVED' && <PendingAccessView user={user} />}
+
+      {user.status === 'APPROVED' && role === 'patient' && (
         <PatientView
           data={data}
           form={form}
@@ -608,7 +643,7 @@ export default function App() {
         />
       )}
 
-      {role === 'driver' && (
+      {user.status === 'APPROVED' && role === 'driver' && (
         <DriverView
           data={data}
           selectedTripId={selectedTripId}
@@ -623,7 +658,7 @@ export default function App() {
         />
       )}
 
-      {role === 'hospital' && (
+      {user.status === 'APPROVED' && role === 'hospital' && (
         <HospitalView
           data={data}
           capacityDrafts={capacityDrafts}
@@ -633,7 +668,7 @@ export default function App() {
         />
       )}
 
-      {role === 'control' && (
+      {user.status === 'APPROVED' && role === 'control' && (
         <ControlView
           data={data}
           selectedIncident={selectedIncident}
@@ -655,7 +690,7 @@ export default function App() {
         />
       )}
 
-      {role === 'simulation' && (
+      {user.status === 'APPROVED' && role === 'simulation' && (
         <SimulationView
           data={data}
           request={simulationForm}
@@ -679,10 +714,31 @@ async function loadPlatformServices() {
   }
 }
 
+function PendingAccessView({ user }: { user: AuthenticatedUser }) {
+  return (
+    <section className="pending-access panel">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">{formatStatus(user.role)} Signup</p>
+          <h2>Approval Pending</h2>
+        </div>
+        <CheckCircle2 size={18} />
+      </div>
+      <p>
+        Your account was created and is waiting for Control Center approval. Patient accounts are active immediately;
+        driver and hospital accounts are reviewed before operational access is enabled.
+      </p>
+    </section>
+  );
+}
+
 function LoginView({
   form,
   setForm,
   onLogin,
+  signupForm,
+  setSignupForm,
+  onSignup,
   hospitalApplicationForm,
   setHospitalApplicationForm,
   onHospitalApplicationSubmit,
@@ -693,6 +749,9 @@ function LoginView({
   form: { username: string; password: string };
   setForm: (form: { username: string; password: string }) => void;
   onLogin: () => void;
+  signupForm: SignupRequest;
+  setSignupForm: (form: SignupRequest) => void;
+  onSignup: () => void;
   hospitalApplicationForm: CreateHospitalApplicationPayload;
   setHospitalApplicationForm: (form: CreateHospitalApplicationPayload) => void;
   onHospitalApplicationSubmit: () => void;
@@ -700,54 +759,86 @@ function LoginView({
   busy: boolean;
   error: string;
 }) {
-  const demoUsers = [
-    { username: 'patient.demo', label: 'Patient' },
-    { username: 'driver.demo', label: 'Driver' },
-    { username: 'hospital.demo', label: 'Hospital' },
-    { username: 'control.demo', label: 'Control' }
-  ];
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
+
+  function useHospitalLocation() {
+    if (!('geolocation' in navigator)) return;
+    navigator.geolocation.getCurrentPosition((position) => {
+      setHospitalApplicationForm({
+        ...hospitalApplicationForm,
+        latitude: Number(position.coords.latitude.toFixed(5)),
+        longitude: Number(position.coords.longitude.toFixed(5))
+      });
+    });
+  }
 
   return (
     <main className="login-shell">
       <section className="login-panel">
         <div className="brand-block">
-          <p className="eyebrow">LifeLine V6</p>
-          <h1>Production Trust</h1>
+          <p className="eyebrow">Emergency Response</p>
+          <h1>LifeLine</h1>
+        </div>
+
+        <div className="auth-mode-toggle">
+          <button className={mode === 'signin' ? 'active' : ''} type="button" onClick={() => setMode('signin')}>Sign in</button>
+          <button className={mode === 'signup' ? 'active' : ''} type="button" onClick={() => setMode('signup')}>Sign up</button>
         </div>
 
         <div className="login-form">
-          <label>
-            Username
-            <input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} />
-          </label>
-          <label>
-            Password
-            <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
-          </label>
-          <button className="primary-button" type="button" onClick={onLogin} disabled={busy}>
-            Sign In
-          </button>
+          {mode === 'signin' ? (
+            <>
+              <label>
+                Email
+                <input value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} />
+              </label>
+              <label>
+                Password
+                <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
+              </label>
+              <button className="primary-button" type="button" onClick={onLogin} disabled={busy}>
+                Sign In
+              </button>
+            </>
+          ) : (
+            <>
+              <label>
+                Name
+                <input value={signupForm.displayName} onChange={(event) => setSignupForm({ ...signupForm, displayName: event.target.value })} />
+              </label>
+              <label>
+                Email
+                <input value={signupForm.email} onChange={(event) => setSignupForm({ ...signupForm, email: event.target.value })} />
+              </label>
+              <label>
+                Password
+                <input type="password" value={signupForm.password} onChange={(event) => setSignupForm({ ...signupForm, password: event.target.value })} />
+              </label>
+              <div className="signup-role-grid">
+                {(['PATIENT', 'DRIVER', 'HOSPITAL'] as SignupRequest['role'][]).map((roleOption) => (
+                  <button
+                    key={roleOption}
+                    className={`role-tab ${signupForm.role === roleOption ? 'active' : ''}`}
+                    type="button"
+                    onClick={() => setSignupForm({ ...signupForm, role: roleOption })}
+                  >
+                    {formatStatus(roleOption)}
+                  </button>
+                ))}
+              </div>
+              <button className="primary-button" type="button" onClick={onSignup} disabled={busy}>
+                Create Account
+              </button>
+            </>
+          )}
           {error && <div className="alert compact-alert">{error}</div>}
         </div>
 
-        <div className="demo-user-grid">
-          {demoUsers.map((demoUser) => (
-            <button
-              key={demoUser.username}
-              className={`role-tab ${form.username === demoUser.username ? 'active' : ''}`}
-              type="button"
-              onClick={() => setForm({ ...form, username: demoUser.username })}
-            >
-              <span>{demoUser.label}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="enrollment-panel">
+        {mode === 'signup' && signupForm.role === 'HOSPITAL' && <div className="enrollment-panel">
           <div className="panel-heading">
             <div>
-              <p className="eyebrow">Hospital Enrollment</p>
-              <h2>Join Response Network</h2>
+              <p className="eyebrow">Hospital Profile</p>
+              <h2>Care Network Details</h2>
             </div>
             <HospitalIcon size={18} />
           </div>
@@ -768,15 +859,12 @@ function LoginView({
               Address
               <input value={hospitalApplicationForm.addressText} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, addressText: event.target.value })} />
             </label>
-            <div className="coordinate-grid">
-              <label>
-                Lat
-                <input type="number" value={hospitalApplicationForm.latitude} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, latitude: Number(event.target.value) })} />
-              </label>
-              <label>
-                Lng
-                <input type="number" value={hospitalApplicationForm.longitude} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, longitude: Number(event.target.value) })} />
-              </label>
+            <div className="location-source-row">
+              <span>{hospitalApplicationForm.latitude.toFixed(4)}, {hospitalApplicationForm.longitude.toFixed(4)}</span>
+              <button className="ghost-button" type="button" onClick={useHospitalLocation}>
+                <Navigation size={15} />
+                Use Current Location
+              </button>
             </div>
             <SpecialtyPicker
               selected={hospitalApplicationForm.specialties}
@@ -791,7 +879,7 @@ function LoginView({
             </button>
             {hospitalApplicationMessage && <p className="form-note">{hospitalApplicationMessage}</p>}
           </div>
-        </div>
+        </div>}
       </section>
     </main>
   );

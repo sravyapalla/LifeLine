@@ -42,6 +42,7 @@ public class JwtService {
         payload.put("sub", user.username());
         payload.put("displayName", user.displayName());
         payload.put("role", user.role().name());
+        payload.put("status", user.status());
         payload.put("iat", issuedAt.getEpochSecond());
         payload.put("exp", expiresAt.getEpochSecond());
         if (user.ambulanceId() != null) {
@@ -77,9 +78,10 @@ public class JwtService {
             String username = String.valueOf(payload.get("sub"));
             String displayName = String.valueOf(payload.get("displayName"));
             UserRole role = UserRole.valueOf(String.valueOf(payload.get("role")));
+            String status = optionalString(payload.get("status"));
             String ambulanceId = optionalString(payload.get("ambulanceId"));
             String hospitalId = optionalString(payload.get("hospitalId"));
-            return Optional.of(new AuthenticatedUser(username, displayName, role, ambulanceId, hospitalId));
+            return Optional.of(new AuthenticatedUser(username, displayName, role, ambulanceId, hospitalId, status == null ? "APPROVED" : status));
         } catch (Exception exception) {
             return Optional.empty();
         }

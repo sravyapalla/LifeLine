@@ -71,6 +71,33 @@ public class AuthController {
         return new AuthResponse(token.token(), token.expiresAt(), authenticatedUser);
     }
 
+    @PostMapping("/signup")
+    @ResponseStatus(HttpStatus.CREATED)
+    public AuthResponse signup(@Valid @RequestBody SignupRequest request) {
+        if (request.role().isControl()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Control users must be invited by an administrator.");
+        }
+        String status = request.role().name().equals("PATIENT") ? "APPROVED" : "PENDING";
+        DemoUser user = userDirectory.register(
+                request.email().toLowerCase(),
+                request.displayName(),
+                passwordEncoder.encode(request.password()),
+                request.role(),
+                status
+        );
+        AuthenticatedUser authenticatedUser = user.authenticatedUser();
+        JwtService.TokenIssue token = jwtService.issue(authenticatedUser, Instant.now());
+        auditService.allowed(
+                authenticatedUser,
+                "auth.signup",
+                "User",
+                authenticatedUser.username(),
+                "Signup completed.",
+                Map.of("role", authenticatedUser.role().name(), "status", authenticatedUser.status())
+        );
+        return new AuthResponse(token.token(), token.expiresAt(), authenticatedUser);
+    }
+
     @GetMapping("/me")
     @ResponseStatus(HttpStatus.OK)
     public AuthenticatedUser me() {

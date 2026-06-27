@@ -28,4 +28,19 @@ public class DemoUserDirectory {
     public Optional<DemoUser> find(String username) {
         return Optional.ofNullable(users.get(username));
     }
+
+    public synchronized DemoUser register(
+            String username,
+            String displayName,
+            String passwordHash,
+            UserRole role,
+            String status
+    ) {
+        if (users.containsKey(username)) {
+            throw new IllegalStateException("An account already exists for this email.");
+        }
+        DemoUser user = new DemoUser(username, displayName, passwordHash, role, null, null, status);
+        users.put(username, user);
+        return user;
+    }
 }
