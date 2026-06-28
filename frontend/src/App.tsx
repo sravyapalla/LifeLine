@@ -26,6 +26,7 @@ import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-le
 import {
   acknowledgeNotification,
   approveHospitalApplication,
+  approveUser,
   clearAuthToken,
   createHospitalApplication,
   createIncident,
@@ -34,6 +35,7 @@ import {
   getCurrentUser,
   getDashboardData,
   getHospitalApplications,
+  getPendingUserApprovals,
   getPlatformServices,
   getStoredAuthToken,
   login,
@@ -92,6 +94,7 @@ interface DashboardState {
   notifications: Notification[];
   simulations: SimulationResult[];
   hospitalApplications: HospitalApplication[];
+  pendingUserApprovals: AuthenticatedUser[];
 }
 
 const initialIncident: CreateIncidentPayload = {
@@ -123,7 +126,7 @@ const strategies: OptimizationStrategy[] = ['GREEDY_SEQUENTIAL', 'GLOBAL_MIN_COS
 
 const roles: { id: Role; label: string; icon: ReactNode }[] = [
   { id: 'patient', label: 'Patient', icon: <UserRound size={17} /> },
-  { id: 'driver', label: 'Driver', icon: <AmbulanceIcon size={17} /> },
+  { id: 'driver', label: 'Ambulance', icon: <AmbulanceIcon size={17} /> },
   { id: 'hospital', label: 'Hospital', icon: <HospitalIcon size={17} /> },
   { id: 'control', label: 'Control', icon: <RadioTower size={17} /> },
   { id: 'simulation', label: 'Simulation', icon: <Activity size={17} /> }
@@ -172,8 +175,10 @@ export default function App() {
     const nextData = await getDashboardData(notificationRoleFor(nextRole), currentUser.role);
     const nextAuditEvents = currentUser.role === 'CONTROL' ? await getAuditEvents() : [];
     const nextPlatformServices = currentUser.role === 'CONTROL' ? await loadPlatformServices() : [];
-    const hospitalApplications = currentUser.role === 'CONTROL' ? await getHospitalApplications() : [];
-    setData({ ...nextData, hospitalApplications });
+    const [hospitalApplications, pendingUserApprovals] = currentUser.role === 'CONTROL'
+      ? await Promise.all([getHospitalApplications(), getPendingUserApprovals()])
+      : [[], []];
+    setData({ ...nextData, hospitalApplications, pendingUserApprovals });
     setAuditEvents(nextAuditEvents);
     setPlatformServices(nextPlatformServices);
     setSimulationResult((current) => current ?? nextData.simulations[0] ?? null);
@@ -457,6 +462,19 @@ export default function App() {
     }
   }
 
+  async function handleApproveUser(username: string) {
+    setBusy(true);
+    setError('');
+    try {
+      await approveUser(username);
+      await load();
+    } catch (approveError) {
+      setError((approveError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleReroute(tripId: string) {
     setBusy(true);
     setError('');
@@ -590,7 +608,7 @@ export default function App() {
         <div className="actions">
           <div className="user-badge">
             <strong>{user.displayName}</strong>
-            <span>{formatStatus(user.role)}</span>
+            <span>{approvalRoleLabel(user.role)}</span>
           </div>
           <button className="icon-button" type="button" onClick={() => load().catch((loadError: Error) => setError(loadError.message))} aria-label="Refresh dashboard" title="Refresh dashboard">
             <RefreshCw size={18} />
@@ -686,6 +704,7 @@ export default function App() {
           auditEvents={auditEvents}
           platformServices={platformServices}
           onApproveHospitalApplication={handleApproveHospitalApplication}
+          onApproveUser={handleApproveUser}
           busy={busy}
         />
       )}
@@ -726,7 +745,7 @@ function PendingAccessView({ user }: { user: AuthenticatedUser }) {
       </div>
       <p>
         Your account was created and is waiting for Control Center approval. Patient accounts are active immediately;
-        driver and hospital accounts are reviewed before operational access is enabled.
+        ambulance and hospital accounts are reviewed before operational access is enabled.
       </p>
     </section>
   );
@@ -822,7 +841,7 @@ function LoginView({
                     type="button"
                     onClick={() => setSignupForm({ ...signupForm, role: roleOption })}
                   >
-                    {formatStatus(roleOption)}
+                    {approvalRoleLabel(roleOption)}
                   </button>
                 ))}
               </div>
@@ -945,7 +964,11 @@ function PatientView({
 
         <IncidentForm form={form} setForm={setForm} onSubmit={onCreateIncident} busy={busy} submitLabel="Request Ambulance" />
 
-        <PatientCoveragePanel ambulances={availableAmbulances} hospitals={availableHospitals} />
+        <PatientCoveragePanel
+          ambulances={availableAmbulances}
+          hospitals={availableHospitals}
+          patientLocation={{ latitude: form.latitude, longitude: form.longitude }}
+        />
       </aside>
 
       <section className="map-stage">
@@ -1005,13 +1028,29 @@ function PatientView({
   );
 }
 
-function PatientCoveragePanel({ ambulances, hospitals }: { ambulances: Ambulance[]; hospitals: Hospital[] }) {
+function PatientCoveragePanel({
+  ambulances,
+  hospitals,
+  patientLocation
+}: {
+  ambulances: Ambulance[];
+  hospitals: Hospital[];
+  patientLocation: { latitude: number; longitude: number };
+}) {
+  const [selectedResource, setSelectedResource] = useState<{ kind: 'ambulance' | 'hospital'; id: string } | null>(null);
+  const nearbyAmbulances = [...ambulances].sort((left, right) => distanceKm(patientLocation, left.location) - distanceKm(patientLocation, right.location));
+  const nearbyHospitals = [...hospitals].sort((left, right) => distanceKm(patientLocation, left.location) - distanceKm(patientLocation, right.location));
+  const visibleAmbulances = nearbyAmbulances.slice(0, 5);
+  const visibleHospitals = nearbyHospitals.slice(0, 5);
+  const selectedAmbulance = selectedResource?.kind === 'ambulance' ? nearbyAmbulances.find((ambulance) => ambulance.id === selectedResource.id) ?? null : null;
+  const selectedHospital = selectedResource?.kind === 'hospital' ? nearbyHospitals.find((hospital) => hospital.id === selectedResource.id) ?? null : null;
+
   return (
     <div className="coverage-panel">
       <div className="panel-heading compact-heading">
         <div>
           <p className="eyebrow">Coverage</p>
-          <h3>Available Now</h3>
+          <h3>Nearest Available</h3>
         </div>
         <MapPin size={18} />
       </div>
@@ -1028,25 +1067,69 @@ function PatientCoveragePanel({ ambulances, hospitals }: { ambulances: Ambulance
       </div>
 
       <div className="coverage-list">
-        {ambulances.slice(0, 3).map((ambulance) => (
-          <div className="coverage-row" key={ambulance.id}>
+        <div className="coverage-section-heading">
+          <span>Ambulances</span>
+          <em>Nearest {visibleAmbulances.length} of {nearbyAmbulances.length}</em>
+        </div>
+        {nearbyAmbulances.length === 0 && <div className="empty-state compact">No ambulances currently available</div>}
+        {visibleAmbulances.map((ambulance) => (
+          <button
+            className={`coverage-row ${selectedResource?.kind === 'ambulance' && selectedResource.id === ambulance.id ? 'selected' : ''}`}
+            key={ambulance.id}
+            type="button"
+            onClick={() => setSelectedResource({ kind: 'ambulance', id: ambulance.id })}
+          >
             <span className={`resource-dot ${ambulance.status.toLowerCase()}`} />
             <span>
               <strong>{ambulance.callSign}</strong>
-              <small>{ambulance.type} - {ambulance.baseStation}</small>
+              <small>{ambulance.type} - {formatDistance(distanceKm(patientLocation, ambulance.location))} away</small>
             </span>
-          </div>
+          </button>
         ))}
-        {hospitals.slice(0, 3).map((hospital) => (
-          <div className="coverage-row" key={hospital.id}>
+
+        <div className="coverage-section-heading">
+          <span>Hospitals</span>
+          <em>Nearest {visibleHospitals.length} of {nearbyHospitals.length}</em>
+        </div>
+        {nearbyHospitals.length === 0 && <div className="empty-state compact">No hospitals currently have capacity</div>}
+        {visibleHospitals.map((hospital) => (
+          <button
+            className={`coverage-row ${selectedResource?.kind === 'hospital' && selectedResource.id === hospital.id ? 'selected' : ''}`}
+            key={hospital.id}
+            type="button"
+            onClick={() => setSelectedResource({ kind: 'hospital', id: hospital.id })}
+          >
             <span className={`resource-dot ${hospital.availableBeds > 0 ? 'available' : 'offline'}`} />
             <span>
               <strong>{hospital.name}</strong>
-              <small>{hospital.availableBeds} beds - {hospital.specialties.slice(0, 2).join(', ')}</small>
+              <small>{hospital.availableBeds} beds - {formatDistance(distanceKm(patientLocation, hospital.location))} away</small>
             </span>
-          </div>
+          </button>
         ))}
       </div>
+
+      {(selectedAmbulance || selectedHospital) && (
+        <div className="coverage-detail">
+          {selectedAmbulance && (
+            <>
+              <strong>{selectedAmbulance.callSign}</strong>
+              <InfoLine label="Type" value={selectedAmbulance.type} />
+              <InfoLine label="Station" value={selectedAmbulance.baseStation} />
+              <InfoLine label="Distance" value={formatDistance(distanceKm(patientLocation, selectedAmbulance.location))} />
+              <InfoLine label="Coordinates" value={formatCoordinates(selectedAmbulance.location)} />
+            </>
+          )}
+          {selectedHospital && (
+            <>
+              <strong>{selectedHospital.name}</strong>
+              <InfoLine label="Beds" value={`${selectedHospital.availableBeds}/${selectedHospital.totalBeds}`} />
+              <InfoLine label="Specialties" value={selectedHospital.specialties.join(', ')} />
+              <InfoLine label="Distance" value={formatDistance(distanceKm(patientLocation, selectedHospital.location))} />
+              <InfoLine label="Coordinates" value={formatCoordinates(selectedHospital.location)} />
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1139,7 +1222,7 @@ function DriverView({
       <aside className="panel">
         <div className="panel-heading">
           <div>
-            <p className="eyebrow">Driver</p>
+            <p className="eyebrow">Ambulance</p>
             <h2>My Unit</h2>
           </div>
           <AmbulanceIcon size={18} />
@@ -1418,6 +1501,7 @@ function ControlView({
   auditEvents,
   platformServices,
   onApproveHospitalApplication,
+  onApproveUser,
   busy
 }: {
   data: DashboardState | null;
@@ -1436,6 +1520,7 @@ function ControlView({
   auditEvents: SecurityAuditEvent[];
   platformServices: PlatformServiceDescriptor[];
   onApproveHospitalApplication: (applicationId: string) => void;
+  onApproveUser: (username: string) => void;
   busy: boolean;
 }) {
   return (
@@ -1559,6 +1644,12 @@ function ControlView({
           busy={busy}
         />
 
+        <UserApprovalsPanel
+          users={data?.pendingUserApprovals ?? []}
+          onApprove={onApproveUser}
+          busy={busy}
+        />
+
         <OutboxPanel
           pending={data?.metrics.pendingOutboxEvents ?? 0}
           published={data?.metrics.publishedOutboxEvents ?? 0}
@@ -1635,6 +1726,38 @@ function HospitalApplicationsPanel({
             <small>{application.totalBeds} beds - {application.specialties.join(', ')}</small>
           </span>
           <button className="ghost-button" type="button" onClick={() => onApprove(application.id)} disabled={busy}>
+            Approve
+          </button>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function UserApprovalsPanel({
+  users,
+  onApprove,
+  busy
+}: {
+  users: AuthenticatedUser[];
+  onApprove: (username: string) => void;
+  busy: boolean;
+}) {
+  const ambulanceSignups = users.filter((user) => user.role === 'DRIVER');
+  const hospitalSignups = users.filter((user) => user.role === 'HOSPITAL');
+  const pending = [...ambulanceSignups, ...hospitalSignups];
+
+  return (
+    <div className="compact-list bordered">
+      <h3>Operational Signups</h3>
+      {pending.length === 0 && <div className="empty-state compact">No pending ambulance or hospital signups</div>}
+      {pending.map((user) => (
+        <article className="application-row" key={user.username}>
+          <span>
+            <strong>{user.displayName}</strong>
+            <small>{approvalRoleLabel(user.role)} - {user.username}</small>
+          </span>
+          <button className="ghost-button" type="button" onClick={() => onApprove(user.username)} disabled={busy}>
             Approve
           </button>
         </article>
@@ -1915,19 +2038,33 @@ function IncidentForm({
   busy: boolean;
   submitLabel: string;
 }) {
+  const [locationMessage, setLocationMessage] = useState('');
+
   function useCurrentLocation() {
     if (!('geolocation' in navigator)) {
       setForm({ ...form, locationSource: 'MANUAL' });
+      setLocationMessage('Current location is not available in this browser.');
       return;
     }
-    navigator.geolocation.getCurrentPosition((position) => {
-      setForm({
-        ...form,
-        latitude: Number(position.coords.latitude.toFixed(5)),
-        longitude: Number(position.coords.longitude.toFixed(5)),
-        locationSource: 'GPS'
-      });
-    });
+    setLocationMessage('Requesting browser location...');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const nextLatitude = Number(position.coords.latitude.toFixed(5));
+        const nextLongitude = Number(position.coords.longitude.toFixed(5));
+        setForm({
+          ...form,
+          latitude: nextLatitude,
+          longitude: nextLongitude,
+          locationSource: 'GPS'
+        });
+        setLocationMessage(`Using current location: ${nextLatitude.toFixed(5)}, ${nextLongitude.toFixed(5)}`);
+      },
+      () => {
+        setForm({ ...form, locationSource: 'MANUAL' });
+        setLocationMessage('Location permission was denied. You can enter address or coordinates manually.');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
   }
 
   return (
@@ -1961,12 +2098,13 @@ function IncidentForm({
         <input value={form.landmark} onChange={(event) => setForm({ ...form, landmark: event.target.value })} />
       </label>
       <div className="location-source-row">
-        <span>{form.locationSource}</span>
+        <span>{form.locationSource} - {formatCoordinates({ latitude: form.latitude, longitude: form.longitude })}</span>
         <button className="ghost-button" type="button" onClick={useCurrentLocation}>
           <Navigation size={15} />
           Use Current Location
         </button>
       </div>
+      {locationMessage && <p className="form-note">{locationMessage}</p>}
       <div className="coordinate-grid">
         <label>
           Lat
@@ -2466,6 +2604,11 @@ function formatStatus(value: string) {
   return value.toLowerCase().split('_').map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }
 
+function approvalRoleLabel(role: AuthenticatedUser['role']) {
+  if (role === 'DRIVER') return 'Ambulance';
+  return formatStatus(role);
+}
+
 function formatStrategy(value: OptimizationStrategy) {
   return value === 'GREEDY_SEQUENTIAL' ? 'Greedy Sequential' : 'Global Min Cost';
 }
@@ -2497,6 +2640,35 @@ function formatDuration(seconds: number) {
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString();
+}
+
+function formatCoordinates(location: { latitude: number; longitude: number }) {
+  return `${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`;
+}
+
+function formatDistance(kilometers: number) {
+  if (!Number.isFinite(kilometers)) return 'unknown';
+  if (kilometers < 1) return `${Math.round(kilometers * 1000)} m`;
+  return `${kilometers.toFixed(1)} km`;
+}
+
+function distanceKm(
+  from: { latitude: number; longitude: number },
+  to: { latitude: number; longitude: number }
+) {
+  const earthRadiusKm = 6371;
+  const deltaLatitude = toRadians(to.latitude - from.latitude);
+  const deltaLongitude = toRadians(to.longitude - from.longitude);
+  const fromLatitude = toRadians(from.latitude);
+  const toLatitude = toRadians(to.latitude);
+  const haversine =
+    Math.sin(deltaLatitude / 2) ** 2 +
+    Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(deltaLongitude / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+}
+
+function toRadians(degrees: number) {
+  return degrees * (Math.PI / 180);
 }
 
 function formatRelativeTime(value: string) {

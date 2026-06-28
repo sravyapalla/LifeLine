@@ -69,7 +69,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(payload.message ?? response.statusText);
+    throw new Error(payload.message ?? payload.detail ?? payload.error ?? response.statusText);
   }
 
   const text = await response.text();
@@ -139,6 +139,16 @@ export async function getDashboardData(role: NotificationRole, userRole: UserRol
   ]);
 
   return { ambulances, liveLocations, hospitals, incidents, trips, dispatchDecisions, outboxEvents, outboxSummary, metrics, notifications, simulations };
+}
+
+export function getPendingUserApprovals() {
+  return request<AuthenticatedUser[]>('/users/pending-approvals');
+}
+
+export function approveUser(username: string) {
+  return request<AuthenticatedUser>(`/users/${encodeURIComponent(username)}/approve`, {
+    method: 'POST'
+  });
 }
 
 export function getAuditEvents(limit = 100) {

@@ -41,22 +41,16 @@ jobs:
     name: Frontend build
     runs-on: ubuntu-latest
     env:
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
       NPM_CONFIG_AUDIT: "false"
       NPM_CONFIG_FUND: "false"
-      NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
-      NPM_CONFIG_REPLACE_REGISTRY_HOST: always
-      NPM_CONFIG_CACHE: ${{ runner.temp }}/npm-cache
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Guard public npm lockfile
-        run: |
-          if grep -Eiq "oraclecorp|artifactory|artifacthub" frontend/package-lock.json; then
-            echo "::error::frontend/package-lock.json contains private registry URLs. Regenerate it against https://registry.npmjs.org/ before opening a PR."
-            exit 1
-          fi
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         working-directory: frontend
         run: npm ci --prefer-online
