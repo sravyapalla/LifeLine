@@ -149,6 +149,10 @@ button {
   background: #ecfdf5;
   font-size: 0.78rem;
   font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .application-row {
@@ -904,6 +908,27 @@ button {
 .coverage-list {
   display: grid;
   gap: 8px;
+  max-height: 330px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.coverage-section-heading {
+  align-items: center;
+  color: #475569;
+  display: flex;
+  font-size: 11px;
+  font-weight: 900;
+  justify-content: space-between;
+  letter-spacing: 0;
+  padding: 4px 2px 0;
+  text-transform: uppercase;
+}
+
+.coverage-section-heading em {
+  color: #64748b;
+  font-style: normal;
+  text-transform: none;
 }
 
 .coverage-row {
@@ -916,6 +941,20 @@ button {
   grid-template-columns: 10px minmax(0, 1fr);
   min-height: 50px;
   padding: 9px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.coverage-row:hover,
+.coverage-row:focus-visible {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  outline: none;
+}
+
+.coverage-row.selected {
+  background: #fff7ed;
+  border-color: #fb923c;
 }
 
 .coverage-row strong,
@@ -930,6 +969,25 @@ button {
   color: #64748b;
   font-size: 11px;
   margin-top: 2px;
+}
+
+.coverage-detail {
+  background: #ffffff;
+  border: 1px solid #dbe4ee;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.coverage-detail > strong {
+  display: block;
+  font-size: 15px;
+  line-height: 1.2;
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tracking-panel {

@@ -25,6 +25,8 @@ import com.lifeline.outbox.OutboxSummary;
 import com.lifeline.outbox.OutboxSummaryService;
 import com.lifeline.security.AuthenticatedUser;
 import com.lifeline.security.CurrentUserService;
+import com.lifeline.security.DemoUser;
+import com.lifeline.security.DemoUserDirectory;
 import com.lifeline.security.SecurityAuditService;
 import com.lifeline.security.UserRole;
 import com.lifeline.simulation.SimulationRequest;
@@ -61,6 +63,7 @@ public class LifeLineController {
     private final NotificationService notificationService;
     private final SimulationService simulationService;
     private final CurrentUserService currentUserService;
+    private final DemoUserDirectory userDirectory;
     private final SecurityAuditService auditService;
 
     public LifeLineController(
@@ -72,6 +75,7 @@ public class LifeLineController {
             NotificationService notificationService,
             SimulationService simulationService,
             CurrentUserService currentUserService,
+            DemoUserDirectory userDirectory,
             SecurityAuditService auditService
     ) {
         this.store = store;
@@ -82,6 +86,7 @@ public class LifeLineController {
         this.notificationService = notificationService;
         this.simulationService = simulationService;
         this.currentUserService = currentUserService;
+        this.userDirectory = userDirectory;
         this.auditService = auditService;
     }
 
@@ -125,6 +130,36 @@ public class LifeLineController {
         AuthenticatedUser user = currentUser();
         requireControl(user, "Only control can review hospital applications.");
         return store.hospitalApplications();
+    }
+
+    @GetMapping("/users/pending-approvals")
+    public List<AuthenticatedUser> pendingUserApprovals() {
+        AuthenticatedUser user = currentUser();
+        requireControl(user, "Only control can review user approvals.");
+        return userDirectory.pendingOperationalUsers().stream()
+                .map(DemoUser::authenticatedUser)
+                .toList();
+    }
+
+    @PostMapping("/users/{username}/approve")
+    public AuthenticatedUser approveUser(@PathVariable String username) {
+        AuthenticatedUser user = currentUser();
+        requireControl(user, "Only control can approve user signups.");
+        DemoUser pending = userDirectory.find(username)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Signup request not found."));
+        String ambulanceId = pending.role() == UserRole.DRIVER ? firstAssignableAmbulanceId() : null;
+        String hospitalId = pending.role() == UserRole.HOSPITAL ? firstAssignableHospitalId() : null;
+        DemoUser approved = userDirectory.approve(username, ambulanceId, hospitalId);
+        AuthenticatedUser approvedUser = approved.authenticatedUser();
+        auditService.allowed(
+                user,
+                "user.approve",
+                "User",
+                username,
+                "Operational signup approved.",
+                Map.of("role", approvedUser.role().name(), "ambulanceId", ambulanceId == null ? "" : ambulanceId, "hospitalId", hospitalId == null ? "" : hospitalId)
+        );
+        return approvedUser;
     }
 
     @GetMapping("/incidents")
@@ -636,6 +671,26 @@ public class LifeLineController {
         if (!user.isControl()) {
             throw forbidden(user, "control.access", "Endpoint", "control-only", message);
         }
+    }
+
+    private String firstAssignableAmbulanceId() {
+        Set<String> assignedAmbulanceIds = userDirectory.assignedAmbulanceIds();
+        return store.ambulances().stream()
+                .filter(ambulance -> !assignedAmbulanceIds.contains(ambulance.id()))
+                .findFirst()
+                .or(() -> store.ambulances().stream().findFirst())
+                .map(Ambulance::id)
+                .orElse(null);
+    }
+
+    private String firstAssignableHospitalId() {
+        Set<String> assignedHospitalIds = userDirectory.assignedHospitalIds();
+        return store.hospitals().stream()
+                .filter(hospital -> !assignedHospitalIds.contains(hospital.id()))
+                .findFirst()
+                .or(() -> store.hospitals().stream().findFirst())
+                .map(Hospital::id)
+                .orElse(null);
     }
 
     private ResponseStatusException forbidden(
