@@ -756,6 +756,46 @@ button {
   width: 100%;
 }
 
+.map-div-icon {
+  background: transparent;
+  border: 0;
+}
+
+.map-icon {
+  align-items: center;
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.22);
+  color: #ffffff;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  line-height: 1;
+  width: 34px;
+}
+
+.map-icon.ambulance {
+  background: #2563eb;
+}
+
+.map-icon.patient {
+  background: #dc2626;
+}
+
+.map-icon.hospital {
+  background: #0f766e;
+}
+
+.map-icon.selected {
+  box-shadow: 0 0 0 4px rgba(251, 146, 60, 0.35), 0 12px 24px rgba(15, 23, 42, 0.26);
+}
+
+.journey-map .leaflet-popup-content strong {
+  color: #172033;
+}
+
 .compact-map {
   height: 580px;
 }

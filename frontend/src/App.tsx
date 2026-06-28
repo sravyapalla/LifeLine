@@ -22,7 +22,8 @@ import {
   Siren,
   UserRound
 } from 'lucide-react';
-import { CircleMarker, MapContainer, Polyline, Popup, TileLayer } from 'react-leaflet';
+import { divIcon } from 'leaflet';
+import { MapContainer, Marker, Polyline, Popup, TileLayer } from 'react-leaflet';
 import {
   acknowledgeNotification,
   approveHospitalApplication,
@@ -61,6 +62,7 @@ import type {
   HospitalApplication,
   Incident,
   IncidentPriority,
+  Location,
   LoginRequest,
   Metrics,
   Notification,
@@ -965,14 +967,13 @@ function PatientView({
       </aside>
 
       <section className="map-stage">
-        <MapPanel
-          ambulances={data?.ambulances ?? []}
-          liveLocations={data?.liveLocations ?? []}
-          hospitals={data?.hospitals ?? []}
-          incidents={data?.incidents ?? []}
-          trips={data?.trips ?? []}
-          selectedIncidentId={selectedIncidentId}
-          selectedTripId={selectedTrip?.id ?? ''}
+        <PatientJourneyMap
+          incident={selectedIncident}
+          draftLocation={{ latitude: form.latitude, longitude: form.longitude }}
+          ambulance={assignedAmbulance ?? null}
+          ambulanceLiveLocation={selectedTrip && assignedAmbulance ? data?.liveLocations.find((location) => location.ambulanceId === assignedAmbulance.id) ?? null : null}
+          hospital={receivingHospital ?? null}
+          trip={selectedTrip ?? null}
         />
       </section>
 
@@ -1207,6 +1208,8 @@ function DriverView({
 }) {
   const selectedTrip = data?.trips.find((trip) => trip.id === selectedTripId) ?? null;
   const ownAmbulance = data?.ambulances[0] ?? null;
+  const selectedIncident = selectedTrip ? data?.incidents.find((incident) => incident.id === selectedTrip.incidentId) ?? null : null;
+  const selectedHospital = selectedTrip ? data?.hospitals.find((hospital) => hospital.id === selectedTrip.hospitalId) ?? null : null;
   const assignedTrips = data?.trips ?? [];
   const receivingHospitals = data?.hospitals.filter((hospital) => hospital.availableBeds > 0) ?? [];
 
@@ -1288,14 +1291,12 @@ function DriverView({
 
         <DriverHospitalPanel hospitals={receivingHospitals} selectedTrip={selectedTrip} />
 
-        <MapPanel
-          ambulances={data?.ambulances ?? []}
-          liveLocations={data?.liveLocations ?? []}
-          hospitals={data?.hospitals ?? []}
-          incidents={data?.incidents ?? []}
-          trips={data?.trips ?? []}
-          selectedIncidentId={selectedTrip?.incidentId ?? ''}
-          selectedTripId={selectedTrip?.id ?? ''}
+        <AmbulanceJourneyMap
+          ambulance={ownAmbulance}
+          liveLocation={ownAmbulance ? data?.liveLocations.find((location) => location.ambulanceId === ownAmbulance.id) ?? null : null}
+          incident={selectedIncident}
+          hospital={selectedHospital}
+          trip={selectedTrip}
           compact
         />
       </aside>
@@ -1454,26 +1455,39 @@ function HospitalView({
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Signals</p>
-            <h2>Receiving Map</h2>
+            <h2>Arrival Board</h2>
           </div>
-          <MapPin size={18} />
+          <Activity size={18} />
         </div>
 
         <InfoLine label="Available Beds" value={String(hospital.availableBeds)} />
         <InfoLine label="Incoming Trips" value={String(incomingTrips.length)} />
         <InfoLine label="Specialties" value={hospital.specialties.join(', ')} />
-        <MapPanel
-          ambulances={data.ambulances}
-          liveLocations={data.liveLocations}
-          hospitals={data.hospitals}
-          incidents={data.incidents}
-          trips={data.trips}
-          selectedIncidentId={incomingTrips[0]?.incidentId ?? ''}
-          selectedTripId={incomingTrips[0]?.id ?? ''}
-          compact
-        />
+        <ArrivalSignalsPanel trips={incomingTrips} data={data} />
       </aside>
     </section>
+  );
+}
+
+function ArrivalSignalsPanel({ trips, data }: { trips: Trip[]; data: DashboardState }) {
+  return (
+    <div className="compact-list bordered arrival-signals">
+      <h3>Arrival Signals</h3>
+      {trips.length === 0 && <div className="empty-state compact">No inbound units</div>}
+      {trips.slice(0, 6).map((trip) => {
+        const ambulance = data.ambulances.find((candidate) => candidate.id === trip.ambulanceId);
+        const incident = data.incidents.find((candidate) => candidate.id === trip.incidentId);
+        return (
+          <article className="compact-row" key={trip.id}>
+            <span className="route-dot" />
+            <span>
+              <strong>{ambulance?.callSign ?? trip.ambulanceId}</strong>
+              <small>{incident?.condition ?? 'Incident'} - {formatStatus(trip.status)} - {trip.hospitalEtaMinutes} min transfer</small>
+            </span>
+          </article>
+        );
+      })}
+    </div>
   );
 }
 
@@ -2447,6 +2461,139 @@ function MetricCard({ icon, label, value, tone }: { icon: ReactNode; label: stri
   );
 }
 
+function PatientJourneyMap({
+  incident,
+  draftLocation,
+  ambulance,
+  ambulanceLiveLocation,
+  hospital,
+  trip
+}: {
+  incident: Incident | null;
+  draftLocation: Location;
+  ambulance: Ambulance | null;
+  ambulanceLiveLocation: AmbulanceLocationSnapshot | null;
+  hospital: Hospital | null;
+  trip: Trip | null;
+}) {
+  const patientLocation = incident?.location ?? draftLocation;
+  const ambulanceLocation = ambulance ? displayAmbulanceLocation(ambulance, ambulanceLiveLocation) : null;
+  const activeRoute = activeJourneyRoute(trip, ambulanceLocation, incident, hospital);
+  const plannedRoute = plannedJourneyRoute(trip, incident, hospital);
+  const points = [
+    coordinate(patientLocation),
+    ...(ambulanceLocation ? [coordinate(ambulanceLocation)] : []),
+    ...(hospital ? [coordinate(hospital.location)] : [])
+  ];
+
+  return (
+    <JourneyMapFrame activeRoute={activeRoute} plannedRoute={plannedRoute} points={points}>
+      {ambulance && ambulanceLocation && (
+        <MapIconMarker kind="ambulance" label="A" position={coordinate(ambulanceLocation)} selected>
+          <strong>{ambulance.callSign}</strong>
+          <br />
+          {ambulanceLiveLocation ? `Live ${formatRelativeTime(ambulanceLiveLocation.updatedAt)}` : ambulance.baseStation}
+        </MapIconMarker>
+      )}
+      <MapIconMarker kind="patient" label="P" position={coordinate(patientLocation)} selected={!ambulance}>
+        <strong>{incident?.patientName ?? 'Request location'}</strong>
+        <br />
+        {incident ? `${incident.condition} - ${incident.priority}` : 'Selected pickup point'}
+      </MapIconMarker>
+      {hospital && (
+        <MapIconMarker kind="hospital" label="H" position={coordinate(hospital.location)}>
+          <strong>{hospital.name}</strong>
+          <br />
+          {hospital.availableBeds}/{hospital.totalBeds} beds
+        </MapIconMarker>
+      )}
+    </JourneyMapFrame>
+  );
+}
+
+function AmbulanceJourneyMap({
+  ambulance,
+  liveLocation,
+  incident,
+  hospital,
+  trip,
+  compact = false
+}: {
+  ambulance: Ambulance | null;
+  liveLocation: AmbulanceLocationSnapshot | null;
+  incident: Incident | null;
+  hospital: Hospital | null;
+  trip: Trip | null;
+  compact?: boolean;
+}) {
+  const ambulanceLocation = ambulance ? displayAmbulanceLocation(ambulance, liveLocation) : null;
+  const activeRoute = activeJourneyRoute(trip, ambulanceLocation, incident, hospital);
+  const plannedRoute = plannedJourneyRoute(trip, incident, hospital);
+  const points = [
+    ...(ambulanceLocation ? [coordinate(ambulanceLocation)] : []),
+    ...(incident ? [coordinate(incident.location)] : []),
+    ...(hospital ? [coordinate(hospital.location)] : [])
+  ];
+
+  return (
+    <JourneyMapFrame activeRoute={activeRoute} plannedRoute={plannedRoute} points={points} compact={compact}>
+      {ambulance && ambulanceLocation && (
+        <MapIconMarker kind="ambulance" label="A" position={coordinate(ambulanceLocation)} selected>
+          <strong>{ambulance.callSign}</strong>
+          <br />
+          {liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : ambulance.baseStation}
+        </MapIconMarker>
+      )}
+      {incident && (
+        <MapIconMarker kind="patient" label="P" position={coordinate(incident.location)}>
+          <strong>{incident.patientName}</strong>
+          <br />
+          {incident.condition} - {incident.priority}
+        </MapIconMarker>
+      )}
+      {hospital && (
+        <MapIconMarker kind="hospital" label="H" position={coordinate(hospital.location)}>
+          <strong>{hospital.name}</strong>
+          <br />
+          {hospital.availableBeds}/{hospital.totalBeds} beds
+        </MapIconMarker>
+      )}
+      {!ambulance && <MapEmptyMarker />}
+    </JourneyMapFrame>
+  );
+}
+
+function JourneyMapFrame({
+  activeRoute,
+  plannedRoute,
+  points,
+  compact = false,
+  children
+}: {
+  activeRoute: [number, number][];
+  plannedRoute: [number, number][];
+  points: [number, number][];
+  compact?: boolean;
+  children: ReactNode;
+}) {
+  const center = centerOf(points.length > 0 ? points : [[12.9716, 77.5946]]);
+  const mapKey = [...points, ...activeRoute, ...plannedRoute].map((point) => point.join(',')).join('|') || 'empty-map';
+
+  return (
+    <div className={`map-card journey-map ${compact ? 'compact-map' : ''}`}>
+      <MapContainer key={mapKey} className="map" center={center} zoom={points.length > 1 ? 13 : 12} scrollWheelZoom>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        {plannedRoute.length > 0 && <Polyline positions={plannedRoute} pathOptions={{ color: '#64748b', weight: 4, opacity: 0.55, dashArray: '8 8' }} />}
+        {activeRoute.length > 0 && <Polyline positions={activeRoute} pathOptions={{ color: '#2563eb', weight: 5, opacity: 0.8 }} />}
+        {children}
+      </MapContainer>
+    </div>
+  );
+}
+
 function MapPanel({
   ambulances,
   liveLocations,
@@ -2470,35 +2617,43 @@ function MapPanel({
   const tripIncident = selectedTrip ? incidents.find((incident) => incident.id === selectedTrip.incidentId) : null;
   const tripAmbulance = selectedTrip ? ambulances.find((ambulance) => ambulance.id === selectedTrip.ambulanceId) : null;
   const tripHospital = selectedTrip ? hospitals.find((hospital) => hospital.id === selectedTrip.hospitalId) : null;
+  const tripAmbulanceLiveLocation = tripAmbulance ? liveLocations.find((location) => location.ambulanceId === tripAmbulance.id) ?? null : null;
+  const tripAmbulanceLocation = tripAmbulance ? displayAmbulanceLocation(tripAmbulance, tripAmbulanceLiveLocation) : null;
   const routePath = tripIncident && tripAmbulance && tripHospital
     ? [
-        [tripAmbulance.location.latitude, tripAmbulance.location.longitude] as [number, number],
-        [tripIncident.location.latitude, tripIncident.location.longitude] as [number, number],
-        [tripHospital.location.latitude, tripHospital.location.longitude] as [number, number]
+        coordinate(tripAmbulanceLocation ?? tripAmbulance.location),
+        coordinate(tripIncident.location),
+        coordinate(tripHospital.location)
       ]
     : [];
+  const markerPoints = [
+    ...hospitals.map((hospital) => coordinate(hospital.location)),
+    ...ambulances.map((ambulance) => coordinate(displayAmbulanceLocation(ambulance, liveLocations.find((location) => location.ambulanceId === ambulance.id) ?? null))),
+    ...incidents.map((incident) => coordinate(incident.location))
+  ];
+  const center = centerOf(routePath.length > 0 ? routePath : markerPoints);
+  const mapKey = `${selectedTripId}-${selectedIncidentId}-${center.join(',')}-${markerPoints.length}`;
 
   return (
     <div className={`map-card ${compact ? 'compact-map' : ''}`}>
-      <MapContainer className="map" center={[12.9716, 77.5946]} zoom={12} scrollWheelZoom>
+      <MapContainer key={mapKey} className="map" center={center} zoom={routePath.length > 0 ? 13 : 12} scrollWheelZoom>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         {routePath.length > 0 && <Polyline positions={routePath} pathOptions={{ color: '#dc2626', weight: 5, opacity: 0.72 }} />}
         {hospitals.map((hospital) => (
-          <CircleMarker
+          <MapIconMarker
             key={hospital.id}
-            center={[hospital.location.latitude, hospital.location.longitude]}
-            radius={hospital.id === selectedTrip?.hospitalId ? 13 : 10}
-            pathOptions={{ color: hospital.availableBeds === 0 ? '#991b1b' : '#0f766e', fillColor: hospital.availableBeds === 0 ? '#ef4444' : '#14b8a6', fillOpacity: 0.85 }}
+            kind="hospital"
+            label="H"
+            position={coordinate(hospital.location)}
+            selected={hospital.id === selectedTrip?.hospitalId}
           >
-            <Popup>
-              <strong>{hospital.name}</strong>
-              <br />
-              {hospital.availableBeds}/{hospital.totalBeds} beds
-            </Popup>
-          </CircleMarker>
+            <strong>{hospital.name}</strong>
+            <br />
+            {hospital.availableBeds}/{hospital.totalBeds} beds
+          </MapIconMarker>
         ))}
         {ambulances.map((ambulance) => (
           <AmbulanceMarker
@@ -2509,18 +2664,17 @@ function MapPanel({
           />
         ))}
         {incidents.map((incident) => (
-          <CircleMarker
+          <MapIconMarker
             key={incident.id}
-            center={[incident.location.latitude, incident.location.longitude]}
-            radius={incident.id === selectedIncidentId ? 13 : 9}
-            pathOptions={{ color: '#991b1b', fillColor: incident.status === 'NEW' ? '#ef4444' : '#f59e0b', fillOpacity: 0.9 }}
+            kind="patient"
+            label="P"
+            position={coordinate(incident.location)}
+            selected={incident.id === selectedIncidentId}
           >
-            <Popup>
-              <strong>{incident.patientName}</strong>
-              <br />
-              {incident.condition} - {incident.priority}
-            </Popup>
-          </CircleMarker>
+            <strong>{incident.patientName}</strong>
+            <br />
+            {incident.condition} - {incident.priority}
+          </MapIconMarker>
         ))}
       </MapContainer>
     </div>
@@ -2536,21 +2690,98 @@ function AmbulanceMarker({
   selected: boolean;
   liveLocation: AmbulanceLocationSnapshot | null;
 }) {
+  const location = displayAmbulanceLocation(ambulance, liveLocation);
   return (
-    <CircleMarker
-      center={[ambulance.location.latitude, ambulance.location.longitude]}
-      radius={selected ? 11 : ambulance.status === 'AVAILABLE' ? 8 : 6}
-      pathOptions={{ color: liveLocation ? '#0f766e' : '#1d4ed8', fillColor: ambulance.status === 'AVAILABLE' ? '#3b82f6' : '#94a3b8', fillOpacity: 0.9 }}
+    <MapIconMarker
+      kind="ambulance"
+      label="A"
+      position={coordinate(location)}
+      selected={selected}
     >
-      <Popup>
-        <strong>{ambulance.callSign}</strong>
-        <br />
-        {ambulance.type} - {formatStatus(ambulance.status)}
-        <br />
-        {liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : ambulance.baseStation}
-      </Popup>
-    </CircleMarker>
+      <strong>{ambulance.callSign}</strong>
+      <br />
+      {ambulance.type} - {formatStatus(ambulance.status)}
+      <br />
+      {liveLocation ? `Live ${formatRelativeTime(liveLocation.updatedAt)}` : ambulance.baseStation}
+    </MapIconMarker>
   );
+}
+
+function MapIconMarker({
+  kind,
+  label,
+  position,
+  selected = false,
+  children
+}: {
+  kind: 'ambulance' | 'patient' | 'hospital';
+  label: string;
+  position: [number, number];
+  selected?: boolean;
+  children: ReactNode;
+}) {
+  const icon = divIcon({
+    className: 'map-div-icon',
+    html: `<span class="map-icon ${kind} ${selected ? 'selected' : ''}">${label}</span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+    popupAnchor: [0, -18]
+  });
+
+  return (
+    <Marker position={position} icon={icon}>
+      <Popup>{children}</Popup>
+    </Marker>
+  );
+}
+
+function MapEmptyMarker() {
+  return (
+    <MapIconMarker kind="ambulance" label="A" position={[12.9716, 77.5946]}>
+      <strong>No ambulance assigned</strong>
+    </MapIconMarker>
+  );
+}
+
+function activeJourneyRoute(
+  trip: Trip | null,
+  ambulanceLocation: Location | null,
+  incident: Incident | null,
+  hospital: Hospital | null
+): [number, number][] {
+  if (!trip || !ambulanceLocation) return [];
+  if (trip.status === 'EN_ROUTE_HOSPITAL') {
+    return hospital ? [coordinate(ambulanceLocation), coordinate(hospital.location)] : [];
+  }
+  if (trip.status === 'RESERVED' || trip.status === 'EN_ROUTE_PATIENT') {
+    return incident ? [coordinate(ambulanceLocation), coordinate(incident.location)] : [];
+  }
+  return [];
+}
+
+function plannedJourneyRoute(trip: Trip | null, incident: Incident | null, hospital: Hospital | null): [number, number][] {
+  if (!trip || !incident || !hospital) return [];
+  if (trip.status === 'RESERVED' || trip.status === 'EN_ROUTE_PATIENT') {
+    return [coordinate(incident.location), coordinate(hospital.location)];
+  }
+  return [];
+}
+
+function displayAmbulanceLocation(ambulance: Ambulance, liveLocation: AmbulanceLocationSnapshot | null): Location {
+  return liveLocation?.location ?? ambulance.location;
+}
+
+function coordinate(location: Location): [number, number] {
+  return [location.latitude, location.longitude];
+}
+
+function centerOf(points: [number, number][]): [number, number] {
+  if (points.length === 0) return [12.9716, 77.5946];
+  const totals = points.reduce(
+    (current, point) => [current[0] + point[0], current[1] + point[1]] as [number, number],
+    [0, 0] as [number, number]
+  );
+  return [totals[0] / points.length, totals[1] / points.length];
 }
 
 function roleFromPath(pathname: string, user?: AuthenticatedUser): Role {
