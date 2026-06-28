@@ -261,6 +261,7 @@ export interface SimulationResult {
 
 export interface LoginRequest {
   username: string;
+  role: UserRole;
   password: string;
 }
 

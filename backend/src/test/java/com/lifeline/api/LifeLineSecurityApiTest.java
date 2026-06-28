@@ -3,6 +3,7 @@ package com.lifeline.api;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.lifeline.location.AmbulanceLocationProjection;
+import com.lifeline.security.UserRole;
 import com.lifeline.store.LifeLineStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,7 +74,7 @@ class LifeLineSecurityApiTest {
     void invalidLoginReturnsConsistentJsonAndAuditCapturesFailure() throws Exception {
         mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("username", "patient.demo", "password", "wrong"))))
+                        .content(json(Map.of("username", "patient.demo", "role", "PATIENT", "password", "wrong"))))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.status", is(401)))
                 .andExpect(jsonPath("$.message", is("Invalid username or password.")));
@@ -218,6 +219,87 @@ class LifeLineSecurityApiTest {
     }
 
     @Test
+    void sameEmailCanHoldSeparatePatientAndAmbulanceProfiles() throws Exception {
+        String email = "dual.role@example.com";
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "email", email,
+                                "displayName", "Dual Role Operator",
+                                "password", DEMO_PASSWORD,
+                                "role", "DRIVER"
+                        ))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.user.role", is("DRIVER")))
+                .andExpect(jsonPath("$.user.status", is("PENDING")));
+
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "email", email,
+                                "displayName", "Dual Role Patient",
+                                "password", DEMO_PASSWORD,
+                                "role", "PATIENT"
+                        ))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.user.role", is("PATIENT")))
+                .andExpect(jsonPath("$.user.status", is("APPROVED")));
+
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "email", email,
+                                "displayName", "Duplicate Patient",
+                                "password", DEMO_PASSWORD,
+                                "role", "PATIENT"
+                        ))))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message", is("An account already exists for this email and role.")));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("username", email, "role", "PATIENT", "password", DEMO_PASSWORD))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.role", is("PATIENT")));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("username", email, "role", "DRIVER", "password", DEMO_PASSWORD))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.user.role", is("DRIVER")))
+                .andExpect(jsonPath("$.user.status", is("PENDING")));
+    }
+
+    @Test
+    void controlCanReviewAndApprovePendingOperationalProfilesByRole() throws Exception {
+        String email = "new.ambulance@example.com";
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "email", email,
+                                "displayName", "New Ambulance",
+                                "password", DEMO_PASSWORD,
+                                "role", "DRIVER"
+                        ))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.user.status", is("PENDING")));
+
+        String controlToken = login("control.demo");
+        mockMvc.perform(get("/api/users/pending-approvals")
+                        .header("Authorization", bearer(controlToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].username", hasItem(email)))
+                .andExpect(jsonPath("$[*].role", hasItem("DRIVER")));
+
+        mockMvc.perform(post("/api/users/" + email + "/approve?role=DRIVER")
+                        .header("Authorization", bearer(controlToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role", is("DRIVER")))
+                .andExpect(jsonPath("$.status", is("APPROVED")))
+                .andExpect(jsonPath("$.ambulanceId", notNullValue()));
+    }
+
+    @Test
     void configuredCorsAllowsLocalFrontendOrigin() throws Exception {
         mockMvc.perform(options("/api/incidents")
                         .header("Origin", "http://localhost:5173")
@@ -229,9 +311,13 @@ class LifeLineSecurityApiTest {
     }
 
     private String login(String username) throws Exception {
+        return login(username, roleForDemoUser(username));
+    }
+
+    private String login(String username, UserRole role) throws Exception {
         String response = mockMvc.perform(post("/api/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("username", username, "password", DEMO_PASSWORD))))
+                        .content(json(Map.of("username", username, "role", role.name(), "password", DEMO_PASSWORD))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token", notNullValue()))
                 .andReturn()
@@ -239,6 +325,19 @@ class LifeLineSecurityApiTest {
                 .getContentAsString();
         JsonNode payload = objectMapper.readTree(response);
         return payload.get("token").asText();
+    }
+
+    private UserRole roleForDemoUser(String username) {
+        if (username.startsWith("driver.")) {
+            return UserRole.DRIVER;
+        }
+        if (username.startsWith("hospital.")) {
+            return UserRole.HOSPITAL;
+        }
+        if (username.startsWith("control.")) {
+            return UserRole.CONTROL;
+        }
+        return UserRole.PATIENT;
     }
 
     private String json(Object value) throws Exception {

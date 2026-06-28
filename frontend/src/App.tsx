@@ -61,6 +61,7 @@ import type {
   HospitalApplication,
   Incident,
   IncidentPriority,
+  LoginRequest,
   Metrics,
   Notification,
   NotificationRole,
@@ -76,7 +77,8 @@ import type {
   SecurityAuditEvent,
   SignupRequest,
   Trip,
-  TripStatus
+  TripStatus,
+  UserRole
 } from './types';
 
 type Role = 'patient' | 'driver' | 'hospital' | 'control' | 'simulation';
@@ -147,11 +149,10 @@ export default function App() {
   const [role, setRole] = useState<Role>(() => roleFromPath(window.location.pathname));
   const [authReady, setAuthReady] = useState(false);
   const [user, setUser] = useState<AuthenticatedUser | null>(null);
-  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [loginForm, setLoginForm] = useState<LoginRequest>({ username: '', role: 'PATIENT', password: '' });
   const [signupForm, setSignupForm] = useState<SignupRequest>({ email: '', displayName: '', password: '', role: 'PATIENT' });
   const [loginError, setLoginError] = useState('');
   const [hospitalApplicationForm, setHospitalApplicationForm] = useState<CreateHospitalApplicationPayload>(initialHospitalApplication);
-  const [hospitalApplicationMessage, setHospitalApplicationMessage] = useState('');
   const [data, setData] = useState<DashboardState | null>(null);
   const [selectedIncidentId, setSelectedIncidentId] = useState('');
   const [selectedTripId, setSelectedTripId] = useState('');
@@ -280,17 +281,22 @@ export default function App() {
     setLoginError('');
     try {
       const response = await signup(signupForm);
+      let signupWarning = '';
       if (signupForm.role === 'HOSPITAL') {
-        await createHospitalApplication({
-          ...hospitalApplicationForm,
-          contactName: hospitalApplicationForm.contactName || signupForm.displayName,
-          contactPhone: hospitalApplicationForm.contactPhone
-        });
+        try {
+          await createHospitalApplication({
+            ...hospitalApplicationForm,
+            contactName: hospitalApplicationForm.contactName || signupForm.displayName,
+            contactPhone: hospitalApplicationForm.contactPhone
+          });
+        } catch (applicationError) {
+          signupWarning = (applicationError as Error).message;
+        }
       }
       const nextRole = roleFromPath(window.location.pathname, response.user);
       setUser(response.user);
       setRole(nextRole);
-      setError('');
+      setError(signupWarning);
       window.history.replaceState(null, '', rolePath(nextRole));
     } catch (authError) {
       setLoginError((authError as Error).message);
@@ -332,21 +338,6 @@ export default function App() {
       }
     } catch (createError) {
       setError((createError as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleHospitalApplicationSubmit() {
-    setBusy(true);
-    setHospitalApplicationMessage('');
-    setLoginError('');
-    try {
-      const application = await createHospitalApplication(hospitalApplicationForm);
-      setHospitalApplicationMessage(`Application ${application.id} submitted for control review.`);
-      setHospitalApplicationForm(initialHospitalApplication);
-    } catch (applicationError) {
-      setHospitalApplicationMessage((applicationError as Error).message);
     } finally {
       setBusy(false);
     }
@@ -462,11 +453,11 @@ export default function App() {
     }
   }
 
-  async function handleApproveUser(username: string) {
+  async function handleApproveUser(username: string, userRole: UserRole) {
     setBusy(true);
     setError('');
     try {
-      await approveUser(username);
+      await approveUser(username, userRole);
       await load();
     } catch (approveError) {
       setError((approveError as Error).message);
@@ -575,8 +566,6 @@ export default function App() {
         onSignup={handleSignup}
         hospitalApplicationForm={hospitalApplicationForm}
         setHospitalApplicationForm={setHospitalApplicationForm}
-        onHospitalApplicationSubmit={handleHospitalApplicationSubmit}
-        hospitalApplicationMessage={hospitalApplicationMessage}
         busy={busy}
         error={loginError}
       />
@@ -738,7 +727,7 @@ function PendingAccessView({ user }: { user: AuthenticatedUser }) {
     <section className="pending-access panel">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">{formatStatus(user.role)} Signup</p>
+          <p className="eyebrow">{approvalRoleLabel(user.role)} Signup</p>
           <h2>Approval Pending</h2>
         </div>
         <CheckCircle2 size={18} />
@@ -760,21 +749,17 @@ function LoginView({
   onSignup,
   hospitalApplicationForm,
   setHospitalApplicationForm,
-  onHospitalApplicationSubmit,
-  hospitalApplicationMessage,
   busy,
   error
 }: {
-  form: { username: string; password: string };
-  setForm: (form: { username: string; password: string }) => void;
+  form: LoginRequest;
+  setForm: (form: LoginRequest) => void;
   onLogin: () => void;
   signupForm: SignupRequest;
   setSignupForm: (form: SignupRequest) => void;
   onSignup: () => void;
   hospitalApplicationForm: CreateHospitalApplicationPayload;
   setHospitalApplicationForm: (form: CreateHospitalApplicationPayload) => void;
-  onHospitalApplicationSubmit: () => void;
-  hospitalApplicationMessage: string;
   busy: boolean;
   error: string;
 }) {
@@ -815,6 +800,18 @@ function LoginView({
                 Password
                 <input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
               </label>
+              <div className="signup-role-grid signin-role-grid">
+                {(['PATIENT', 'DRIVER', 'HOSPITAL', 'CONTROL'] as UserRole[]).map((roleOption) => (
+                  <button
+                    key={roleOption}
+                    className={`role-tab ${form.role === roleOption ? 'active' : ''}`}
+                    type="button"
+                    onClick={() => setForm({ ...form, role: roleOption })}
+                  >
+                    {approvalRoleLabel(roleOption)}
+                  </button>
+                ))}
+              </div>
               <button className="primary-button" type="button" onClick={onLogin} disabled={busy}>
                 Sign In
               </button>
@@ -893,10 +890,6 @@ function LoginView({
               Beds
               <input type="number" min={1} value={hospitalApplicationForm.totalBeds} onChange={(event) => setHospitalApplicationForm({ ...hospitalApplicationForm, totalBeds: Number(event.target.value) })} />
             </label>
-            <button className="secondary-button" type="button" onClick={onHospitalApplicationSubmit} disabled={busy}>
-              Submit for Review
-            </button>
-            {hospitalApplicationMessage && <p className="form-note">{hospitalApplicationMessage}</p>}
           </div>
         </div>}
       </section>
@@ -1520,7 +1513,7 @@ function ControlView({
   auditEvents: SecurityAuditEvent[];
   platformServices: PlatformServiceDescriptor[];
   onApproveHospitalApplication: (applicationId: string) => void;
-  onApproveUser: (username: string) => void;
+  onApproveUser: (username: string, role: UserRole) => void;
   busy: boolean;
 }) {
   return (
@@ -1740,7 +1733,7 @@ function UserApprovalsPanel({
   busy
 }: {
   users: AuthenticatedUser[];
-  onApprove: (username: string) => void;
+  onApprove: (username: string, role: UserRole) => void;
   busy: boolean;
 }) {
   const ambulanceSignups = users.filter((user) => user.role === 'DRIVER');
@@ -1757,7 +1750,7 @@ function UserApprovalsPanel({
             <strong>{user.displayName}</strong>
             <small>{approvalRoleLabel(user.role)} - {user.username}</small>
           </span>
-          <button className="ghost-button" type="button" onClick={() => onApprove(user.username)} disabled={busy}>
+          <button className="ghost-button" type="button" onClick={() => onApprove(user.username, user.role)} disabled={busy}>
             Approve
           </button>
         </article>

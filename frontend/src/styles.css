@@ -67,6 +67,11 @@ button {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.signin-role-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 4px 0;
+}
+
 .auth-mode-toggle button {
   min-height: 40px;
   border: 1px solid var(--border);
@@ -522,6 +527,36 @@ button {
 .patient-layout,
 .control-layout {
   grid-template-columns: 340px minmax(0, 1fr) 360px;
+}
+
+.patient-layout {
+  align-items: start;
+  grid-template-areas:
+    "request status"
+    "map status";
+  grid-template-columns: minmax(0, 1fr) 360px;
+}
+
+.patient-layout > aside:first-child {
+  grid-area: request;
+}
+
+.patient-layout > .map-stage {
+  grid-area: map;
+  min-height: 360px;
+}
+
+.patient-layout > aside:last-child {
+  grid-area: status;
+}
+
+.patient-layout .map-card,
+.patient-layout .map {
+  height: 360px;
+}
+
+.patient-layout .panel {
+  min-height: auto;
 }
 
 .driver-layout {
@@ -1719,6 +1754,10 @@ button {
     min-height: auto;
   }
 
+  .patient-layout > aside:last-child {
+    grid-column: auto;
+  }
+
   .hospital-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1744,6 +1783,13 @@ button {
   .hospital-grid,
   .trip-grid {
     grid-template-columns: 1fr;
+  }
+
+  .patient-layout {
+    grid-template-areas:
+      "request"
+      "status"
+      "map";
   }
 
   .panel,
@@ -1773,6 +1819,10 @@ button {
 
   .role-tabs {
     display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .signin-role-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
