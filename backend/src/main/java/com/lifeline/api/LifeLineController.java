@@ -142,14 +142,17 @@ public class LifeLineController {
     }
 
     @PostMapping("/users/{username}/approve")
-    public AuthenticatedUser approveUser(@PathVariable String username) {
+    public AuthenticatedUser approveUser(@PathVariable String username, @RequestParam UserRole role) {
         AuthenticatedUser user = currentUser();
         requireControl(user, "Only control can approve user signups.");
-        DemoUser pending = userDirectory.find(username)
+        if (role != UserRole.DRIVER && role != UserRole.HOSPITAL) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only ambulance and hospital signups require approval.");
+        }
+        DemoUser pending = userDirectory.find(username, role)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Signup request not found."));
         String ambulanceId = pending.role() == UserRole.DRIVER ? firstAssignableAmbulanceId() : null;
         String hospitalId = pending.role() == UserRole.HOSPITAL ? firstAssignableHospitalId() : null;
-        DemoUser approved = userDirectory.approve(username, ambulanceId, hospitalId);
+        DemoUser approved = userDirectory.approve(username, role, ambulanceId, hospitalId);
         AuthenticatedUser approvedUser = approved.authenticatedUser();
         auditService.allowed(
                 user,

@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.util.Locale;
 import java.util.Map;
 
 @RestController
@@ -45,7 +46,7 @@ public class AuthController {
 
     @PostMapping("/login")
     public AuthResponse login(@Valid @RequestBody LoginRequest request) {
-        DemoUser user = userDirectory.find(request.username()).orElse(null);
+        DemoUser user = userDirectory.find(request.username().toLowerCase(Locale.ROOT), request.role()).orElse(null);
         if (user == null || !passwordEncoder.matches(request.password(), user.passwordHash())) {
             auditService.anonymous(
                     request.username(),
@@ -54,7 +55,7 @@ public class AuthController {
                     request.username(),
                     "DENIED",
                     "Invalid username or password.",
-                    Map.of("username", request.username())
+                    Map.of("username", request.username(), "role", request.role().name())
             );
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid username or password.");
         }
@@ -66,7 +67,7 @@ public class AuthController {
                 "User",
                 authenticatedUser.username(),
                 "Login succeeded.",
-                Map.of("role", authenticatedUser.role().name())
+                Map.of("role", authenticatedUser.role().name(), "status", authenticatedUser.status())
         );
         return new AuthResponse(token.token(), token.expiresAt(), authenticatedUser);
     }
@@ -79,7 +80,7 @@ public class AuthController {
         }
         String status = request.role().name().equals("PATIENT") ? "APPROVED" : "PENDING";
         DemoUser user = userDirectory.register(
-                request.email().toLowerCase(),
+                request.email().toLowerCase(Locale.ROOT),
                 request.displayName(),
                 passwordEncoder.encode(request.password()),
                 request.role(),

@@ -145,8 +145,8 @@ export function getPendingUserApprovals() {
   return request<AuthenticatedUser[]>('/users/pending-approvals');
 }
 
-export function approveUser(username: string) {
-  return request<AuthenticatedUser>(`/users/${encodeURIComponent(username)}/approve`, {
+export function approveUser(username: string, role: UserRole) {
+  return request<AuthenticatedUser>(`/users/${encodeURIComponent(username)}/approve?role=${encodeURIComponent(role)}`, {
     method: 'POST'
   });
 }
